@@ -1,0 +1,73 @@
+{
+    "name": "compressor-vscode",
+    "displayName": "Compressor — AI Token Savings",
+    "description": "Status-bar ticker and report for estimated token savings recorded by the compressor ledger. Read-only: no network calls, reads nothing but the local ledger JSONL.",
+    "version": "0.1.0",
+    "publisher": "aStudioPlus",
+    "author": "Andrey Vasilevsky <anvanster@gmail.com>",
+    "license": "MIT",
+    "private": false,
+    "engines": {
+        "vscode": "^1.90.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "keywords": [
+        "token-optimization",
+        "ai-coding-agents",
+        "copilot",
+        "claude-code",
+        "savings"
+    ],
+    "main": "./out/extension.js",
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "contributes": {
+        "commands": [
+            {
+                "command": "compressor.showSavings",
+                "title": "Show Savings",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.status",
+                "title": "Status",
+                "category": "Compressor"
+            }
+        ],
+        "configuration": {
+            "title": "Compressor",
+            "properties": {
+                "compressor.savingsWindow": {
+                    "type": "string",
+                    "enum": [
+                        "7d",
+                        "30d",
+                        "all"
+                    ],
+                    "default": "30d",
+                    "description": "Lookback window for the savings ticker and report."
+                }
+            }
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "node esbuild.js --production",
+        "build": "node esbuild.js",
+        "watch": "node esbuild.js --watch",
+        "typecheck": "tsc -p tsconfig.json --noEmit",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "@astudioplus/compressor": "file:../compressor"
+    },
+    "devDependencies": {
+        "@types/node": "^20.10.0",
+        "@types/vscode": "~1.90.0",
+        "esbuild": "^0.28.0",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.0"
+    }
+}
