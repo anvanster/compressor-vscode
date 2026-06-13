@@ -2,7 +2,7 @@
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
     "description": "Compressed file-read tool for Copilot agent mode, savings ticker/report, and manage commands for the compressor ledger and instruction packs. No network calls.",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "publisher": "aStudioPlus",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
     "license": "MIT",
@@ -43,7 +43,22 @@
             },
             {
                 "command": "compressor.setMode",
-                "title": "Set Mode",
+                "title": "Set Instruction-Pack Mode (agents)",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.selectMode",
+                "title": "Select Read Compression Mode",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.countTokens",
+                "title": "Count Tokens (active file or selection)",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.compressSelection",
+                "title": "Preview Compression (active file or selection)",
                 "category": "Compressor"
             },
             {

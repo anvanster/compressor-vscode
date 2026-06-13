@@ -5,6 +5,7 @@
 
 export const StatusBarAlignment = { Left: 1, Right: 2 } as const;
 export const ViewColumn = { One: 1, Two: 2, Active: -1 } as const;
+export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;
 
 interface DisposableLike {
   dispose(): unknown;
@@ -54,18 +55,22 @@ export const window = {
   showInformationMessage: async (): Promise<undefined> => undefined,
   showWarningMessage: async (): Promise<undefined> => undefined,
   showErrorMessage: async (): Promise<undefined> => undefined,
+  activeTextEditor: undefined as unknown,
 };
 
 export const workspace = {
   workspaceFolders: undefined as undefined,
   getConfiguration: () => ({
     get: <T>(_section: string, defaultValue?: T): T | undefined => defaultValue,
+    update: async (): Promise<void> => undefined,
   }),
   onDidChangeConfiguration: () => noopDisposable,
+  openTextDocument: async (): Promise<{ uri: unknown }> => ({ uri: undefined }),
 };
 
 export const commands = {
   registerCommand: () => noopDisposable,
+  executeCommand: async (): Promise<undefined> => undefined,
 };
 
 // LanguageModelTool API (finalized in VS Code 1.95) — value shapes only.

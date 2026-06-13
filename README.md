@@ -24,13 +24,23 @@ manage commands for instruction packs. No network calls.
   in the configured window. Chars are exact; token figures are estimates from
   the cheap estimator, never billable counts. Click it for the report.
 - **Compressor: Show Savings** — the savings report (by day / tool / mode) in
-  a webview. Static HTML, scripts disabled.
+  a webview, themed to the active color scheme. Static HTML, scripts disabled.
+  Appends an **actual-usage** section parsed from this project's Claude Code
+  session transcripts (`~/.claude`) — authoritative token counts, clearly
+  labeled *not savings* and not billable dollars (Claude Code only).
+- **Mode indicator** (status bar): `$(fold) compressor: <mode>` — click to
+  switch the read tool's compression mode without the command palette.
+- **Compressor: Count Tokens** — exact chars and an estimated token count for
+  the active file or selection (chars/3.5; never billable).
+- **Compressor: Preview Compression** — runs the engine over the active file or
+  selection exactly as `compressor_read` would and opens a side-by-side diff
+  (numbered original vs compressed). No file writes.
 - **Compressor: Status** — per-adapter install status for the first workspace
   folder, steering state, and ledger recency.
-- **Compressor: Init / Set Mode / Uninstall** — plan instruction-pack changes
-  with the library adapters, review the rendered diff, confirm, apply.
-  claude-code/copilot (hook-bearing) are offered only when `compressor-hook`
-  resolves on PATH; otherwise use the `compressor` CLI.
+- **Compressor: Init / Set Instruction-Pack Mode / Uninstall** — plan
+  instruction-pack changes with the library adapters, review the rendered diff,
+  confirm, apply. claude-code/copilot (hook-bearing) are offered only when
+  `compressor-hook` resolves on PATH; otherwise use the `compressor` CLI.
 
 Settings: `compressor.savingsWindow` (`7d` | `30d` | `all`, default `30d`),
 `compressor.mode` (`full` | `optimized` | `slim`, default `optimized` — the
@@ -44,7 +54,9 @@ read tool's compression mode; `full` = passthrough).
   Copilot via `.github/copilot-instructions.md` / `AGENTS.md` — see the
   [compressor docs](https://github.com/anvanster/compressor).
 - It makes no network calls and reads no file contents beyond the ledger
-  JSONL and files explicitly requested through `compressor_read`.
+  JSONL, this project's Claude Code session transcripts (for the usage report),
+  and files explicitly requested through `compressor_read` / the preview and
+  count commands.
 - It shows no percentage claims; measured savings come from
   `compressor benchmark`, not this view.
 

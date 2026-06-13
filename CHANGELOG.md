@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 — 2026-06-12
+
+- **Click-to-toggle mode indicator**: a status-bar item (`$(fold) compressor:
+  <mode>`) shows the read-tool compression mode and opens a quickpick to change
+  it — sets `compressor.mode` at the workspace level (global when no folder is
+  open). Distinct from `Set Instruction-Pack Mode`, which writes agent config.
+- **`Compressor: Count Tokens`**: counts the active file (or selection) — exact
+  chars and an estimated token figure (chars/3.5, the ledger's estimator; never
+  billable). Keeps js-tiktoken out of the bundle on purpose.
+- **`Compressor: Preview Compression`**: runs the engine over the active file
+  (or selection) exactly as `compressor_read` would and opens a side-by-side
+  diff (numbered original vs compressed) with the saved-chars summary in the
+  title. No file writes. Honors `compressor.mode` (`full` is a no-op).
+- **Actual-usage section in the savings report**: the report now appends
+  authoritative token usage parsed from this project's Claude Code session
+  transcripts (`~/.claude`) — the CLI `compressor stats` view. Clearly labeled
+  actual usage, **not savings** and not billable dollars; Claude Code only.
+- The savings report adapts to the active VS Code color theme (colors and font
+  from `--vscode-*` variables; standalone `--html` unchanged in a browser).
+
 ## 0.2.0 — 2026-06-12
 
 - **`compressor_read` language-model tool** (`#compressorRead` in Copilot

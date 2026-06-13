@@ -88,10 +88,10 @@ export function numberLines(lines: readonly string[], startLine: number): string
  * below 200 saved chars or 10% of the input, the rewrite is noise. Saved chars
  * are measured marker-exclusive, mirroring the hook.
  */
-const MIN_SAVED_CHARS = 200;
-const MIN_SAVED_RATIO = 0.1;
+export const MIN_SAVED_CHARS = 200;
+export const MIN_SAVED_RATIO = 0.1;
 
-function lengthSansMarkers(text: string): number {
+export function lengthSansMarkers(text: string): number {
   if (!text.includes(OMISSION_MARKER)) {
     return text.length;
   }
