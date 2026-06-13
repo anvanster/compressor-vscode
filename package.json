@@ -108,6 +108,11 @@
                     ],
                     "default": "optimized",
                     "description": "Compression mode for the compressor_read tool. 'full' disables compression (passthrough); 'optimized' strips comments and dedupes repeated lines; 'slim' additionally filters logs. Omitted content is always marked with a recoverable [compressor:] marker; token figures derived from it are estimates."
+                },
+                "compressor.showActualUsage": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Append an 'actual usage' section to the savings report with authoritative token counts parsed from this project's Claude Code session transcripts (~/.claude). Off by default — it covers Claude Code only, not Copilot. Enable to see real per-model usage alongside the estimated savings."
                 }
             }
         },

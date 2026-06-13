@@ -14,9 +14,10 @@ report (**Compressor: Show Savings**) to see:
   The **by agent** view separates Copilot (VS Code) from Claude Code and the
   other surfaces sharing the ledger. Hover any bar for the exact character
   breakdown.
-- **Actual usage** — authoritative token counts (input / output / cache, by
-  model) parsed from this project's Claude Code transcripts. Real usage,
-  *not savings* and not billable dollars; Claude Code only.
+- **Actual usage** *(optional — off by default; enable
+  `compressor.showActualUsage`)* — authoritative token counts (input / output /
+  cache, by model) parsed from this project's Claude Code transcripts. Real
+  usage, *not savings* and not billable dollars; Claude Code only.
 
 Character counts are exact; token figures are estimates (chars / 3.5). No
 percentage claims — measured savings come from `compressor benchmark`. The

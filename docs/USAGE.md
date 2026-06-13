@@ -116,9 +116,10 @@ and limit the marker gave, and show me those lines.
   tool, and mode. The **by agent** view separates Copilot (VS Code) from Claude
   Code and any other surfaces sharing the ledger. Hover a bar for the exact
   chars breakdown.
-- Below the savings charts, an **actual usage** section reports authoritative
-  token counts from this project's Claude Code session transcripts — real usage,
-  *not savings* and not billable dollars (Claude Code only).
+- Optionally (set `compressor.showActualUsage`, off by default), an **actual
+  usage** section below the charts reports authoritative token counts from this
+  project's Claude Code session transcripts — real usage, *not savings* and not
+  billable dollars (Claude Code only).
 
 Token figures from compressor are estimates (the cheap chars/3.5 estimator);
 character counts are exact. Measured savings come from `compressor benchmark`,

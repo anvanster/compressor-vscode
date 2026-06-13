@@ -57,6 +57,11 @@ export class SavingsPanel implements vscode.Disposable {
    * failure (no folder, unreadable transcripts) just omits the section.
    */
   private async readUsage(window: string): Promise<TranscriptUsage | undefined> {
+    // Opt-in (off by default): the actual-usage section covers Claude Code
+    // transcripts only, which is out of place under Copilot-centric savings.
+    if (vscode.workspace.getConfiguration('compressor').get('showActualUsage') !== true) {
+      return undefined;
+    }
     const projectDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (projectDir === undefined) {
       return undefined;

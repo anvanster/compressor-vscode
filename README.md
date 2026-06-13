@@ -33,9 +33,10 @@ manage commands for instruction packs. No network calls.
   the cheap estimator, never billable counts. Click it for the report.
 - **Compressor: Show Savings** — the savings report (by day / agent / tool / mode) in
   a webview, themed to the active color scheme. Static HTML, scripts disabled.
-  Appends an **actual-usage** section parsed from this project's Claude Code
-  session transcripts (`~/.claude`) — authoritative token counts, clearly
-  labeled *not savings* and not billable dollars (Claude Code only).
+  Optionally (set `compressor.showActualUsage`, off by default) appends an
+  **actual-usage** section parsed from this project's Claude Code session
+  transcripts (`~/.claude`) — authoritative token counts, clearly labeled
+  *not savings* and not billable dollars (Claude Code only).
 - **Mode indicator** (status bar): `$(fold) compressor: <mode>` — click to
   switch the read tool's compression mode without the command palette.
 - **Compressor: Count Tokens** — exact chars and an estimated token count for
@@ -52,7 +53,9 @@ manage commands for instruction packs. No network calls.
 
 Settings: `compressor.savingsWindow` (`7d` | `30d` | `all`, default `30d`),
 `compressor.mode` (`full` | `optimized` | `slim`, default `optimized` — the
-read tool's compression mode; `full` = passthrough).
+read tool's compression mode; `full` = passthrough), and
+`compressor.showActualUsage` (default `false` — show the Claude Code
+transcript usage section in the report).
 
 ## Try it
 

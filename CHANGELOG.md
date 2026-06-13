@@ -23,10 +23,12 @@
   (or selection) exactly as `compressor_read` would and opens a side-by-side
   diff (numbered original vs compressed) with the saved-chars summary in the
   title. No file writes. Honors `compressor.mode` (`full` is a no-op).
-- **Actual-usage section in the savings report**: the report now appends
-  authoritative token usage parsed from this project's Claude Code session
-  transcripts (`~/.claude`) — the CLI `compressor stats` view. Clearly labeled
-  actual usage, **not savings** and not billable dollars; Claude Code only.
+- **Actual-usage section in the savings report** *(opt-in, off by default —
+  `compressor.showActualUsage`)*: authoritative token usage parsed from this
+  project's Claude Code session transcripts (`~/.claude`) — the CLI `compressor
+  stats` view. Clearly labeled actual usage, **not savings** and not billable
+  dollars; Claude Code only. Off by default since it covers Claude Code, not
+  Copilot.
 - The savings report adapts to the active VS Code color theme (colors and font
   from `--vscode-*` variables; standalone `--html` unchanged in a browser).
 - **By-agent breakdown in the savings report** — a section grouping savings by
