@@ -29,6 +29,9 @@
   actual usage, **not savings** and not billable dollars; Claude Code only.
 - The savings report adapts to the active VS Code color theme (colors and font
   from `--vscode-*` variables; standalone `--html` unchanged in a browser).
+- **By-agent breakdown in the savings report** — a section grouping savings by
+  surface (Copilot (VS Code), Claude Code, Copilot CLI, OpenCode), so the
+  shared ledger shows which agent saved what.
 - **Two-tone savings bars**: each bar's full length is the total original
   tokens, with the saved portion highlighted; the value column no longer
   truncates. Hover a bar for the chars breakdown.

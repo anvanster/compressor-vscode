@@ -112,7 +112,9 @@ and limit the marker gave, and show me those lines.
 - The status bar shows **`≈<n> tok saved`** for the configured window. Click it
   (or run **Compressor: Show Savings**) to open the report.
 - The report's bars are two-tone: the **full bar is the total original tokens**,
-  the **bright segment is what compressor saved**. Hover a bar for the exact
+  the **bright segment is what compressor saved**, broken down by day, agent,
+  tool, and mode. The **by agent** view separates Copilot (VS Code) from Claude
+  Code and any other surfaces sharing the ledger. Hover a bar for the exact
   chars breakdown.
 - Below the savings charts, an **actual usage** section reports authoritative
   token counts from this project's Claude Code session transcripts — real usage,

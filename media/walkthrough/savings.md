@@ -10,8 +10,10 @@ report (**Compressor: Show Savings**) to see:
 - **Totals** — exact characters saved, estimated tokens saved, and the event
   count for the window.
 - **Two-tone bars** — the full bar is the total original tokens; the bright
-  part is what compressor saved — broken down by day, tool, and mode. Hover any
-  bar for the exact character breakdown.
+  part is what compressor saved — broken down by day, agent, tool, and mode.
+  The **by agent** view separates Copilot (VS Code) from Claude Code and the
+  other surfaces sharing the ledger. Hover any bar for the exact character
+  breakdown.
 - **Actual usage** — authoritative token counts (input / output / cache, by
   model) parsed from this project's Claude Code transcripts. Real usage,
   *not savings* and not billable dollars; Claude Code only.

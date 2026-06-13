@@ -31,7 +31,7 @@ manage commands for instruction packs. No network calls.
 - **Ticker** (status bar): `≈12.3k tok saved (30d)` — estimated tokens saved
   in the configured window. Chars are exact; token figures are estimates from
   the cheap estimator, never billable counts. Click it for the report.
-- **Compressor: Show Savings** — the savings report (by day / tool / mode) in
+- **Compressor: Show Savings** — the savings report (by day / agent / tool / mode) in
   a webview, themed to the active color scheme. Static HTML, scripts disabled.
   Appends an **actual-usage** section parsed from this project's Claude Code
   session transcripts (`~/.claude`) — authoritative token counts, clearly
