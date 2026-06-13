@@ -4,6 +4,7 @@
     "description": "Compressed file-read tool for Copilot agent mode, savings ticker/report, and manage commands for the compressor ledger and instruction packs. No network calls.",
     "version": "0.3.0",
     "publisher": "aStudioPlus",
+    "icon": "assets/icon.png",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
     "license": "MIT",
     "private": false,

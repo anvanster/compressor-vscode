@@ -1,12 +1,15 @@
-# everything ships from the esbuild bundle in out/
+# everything ships from the esbuild bundle in out/ (plus icon.png + docs)
 src/**
 tests/**
+scripts/**
 node_modules/**
 out/*.map
 esbuild.js
 tsconfig.json
 vitest.config.ts
 VALIDATION.md
+assets/icon.svg
+assets/icon-256.png
 .gitignore
 .vscodeignore
 *.vsix
