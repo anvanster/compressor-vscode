@@ -221,7 +221,7 @@
                     },
                     {
                         "id": "tools",
-                        "title": "All three agent tools",
+                        "title": "Read, search & outline",
                         "description": "Compressor's three tools: #compressorRead, #compressorSearch (find where code is used), and #compressorOutline (a file's shape) — see the example prompts to the right.",
                         "media": {
                             "markdown": "media/walkthrough/tools.md"
