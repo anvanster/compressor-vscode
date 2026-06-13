@@ -1,10 +1,13 @@
 # Compressor — AI Token Savings (VS Code)
 
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/aStudioPlus.compressor-vscode?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=aStudioPlus.compressor-vscode)
+
 Companion extension for
-[compressor](https://github.com/anvanster/compressor): a compressed file-read
-tool for Copilot agent mode, a savings ticker/report over the compressor
-ledger (`~/.compressor/ledger`, override with `COMPRESSOR_LEDGER_DIR`), and
-manage commands for instruction packs. No network calls.
+[compressor](https://github.com/anvanster/compressor): compressed
+read/search/outline tools for Copilot agent mode, a savings ticker/report over
+the compressor ledger (`~/.compressor/ledger`, override with
+`COMPRESSOR_LEDGER_DIR`), and manage commands for instruction packs. No network
+calls.
 
 ## Features
 
@@ -90,16 +93,24 @@ large or log files. More examples and the full command list are in
 - It shows no percentage claims; measured savings come from
   `compressor benchmark`, not this view.
 
-## Install (from VSIX)
+## Install
 
-Not on the marketplace. Package locally and install:
+From the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=aStudioPlus.compressor-vscode)
+— search **"Compressor — AI Token Savings"** in the Extensions view, or from a
+terminal:
 
 ```sh
-npm run package            # produces compressor-vscode-0.3.0.vsix
-code --install-extension compressor-vscode-0.3.0.vsix
+code --install-extension aStudioPlus.compressor-vscode
 ```
 
-Usage guide and example prompts: `docs/USAGE.md`.
+Or build and install the VSIX locally:
+
+```sh
+npm run package            # produces compressor-vscode-<version>.vsix
+code --install-extension compressor-vscode-<version>.vsix
+```
+
+Usage guide and example prompts: [`docs/USAGE.md`](docs/USAGE.md).
 
 ## Development
 
