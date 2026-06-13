@@ -50,6 +50,10 @@ export const window = {
     show(): void {},
     dispose(): void {},
   }),
+  showQuickPick: async (): Promise<undefined> => undefined,
+  showInformationMessage: async (): Promise<undefined> => undefined,
+  showWarningMessage: async (): Promise<undefined> => undefined,
+  showErrorMessage: async (): Promise<undefined> => undefined,
 };
 
 export const workspace = {
@@ -62,4 +66,17 @@ export const workspace = {
 
 export const commands = {
   registerCommand: () => noopDisposable,
+};
+
+// LanguageModelTool API (finalized in VS Code 1.95) — value shapes only.
+export class LanguageModelTextPart {
+  constructor(public readonly value: string) {}
+}
+
+export class LanguageModelToolResult {
+  constructor(public readonly content: unknown[]) {}
+}
+
+export const lm = {
+  registerTool: () => noopDisposable,
 };

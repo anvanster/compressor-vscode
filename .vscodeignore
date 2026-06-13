@@ -1,0 +1,12 @@
+# everything ships from the esbuild bundle in out/
+src/**
+tests/**
+node_modules/**
+out/*.map
+esbuild.js
+tsconfig.json
+vitest.config.ts
+VALIDATION.md
+.gitignore
+.vscodeignore
+*.vsix

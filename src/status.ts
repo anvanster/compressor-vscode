@@ -3,6 +3,7 @@ import os from 'node:os';
 import { adapters } from '@astudioplus/compressor';
 import type { AdapterContext } from '@astudioplus/compressor';
 import type { LedgerSource } from './ledger-source';
+import { STEERING_RELATIVE_PATH, steeringInstalled } from './steering';
 
 // "Compressor: Status" — per-adapter install status for the first workspace
 // folder plus ledger recency, ending with the honesty line. Read-only: the
@@ -10,14 +11,17 @@ import type { LedgerSource } from './ledger-source';
 
 export const HONESTY_LINE =
   'VS Code hooks cannot replace tool output (doc-verified 2026-06-12) — ' +
-  'hook-side compression is not possible in VS Code; instructions come from ' +
-  '.github/copilot-instructions.md / AGENTS.md.';
+  'hook-side compression in VS Code itself comes only from the #compressorRead ' +
+  'tool; instructions come from .github/copilot-instructions.md / AGENTS.md.';
 
 // hookCommand is used by status() only for ownership MATCHING (exact-command
 // and PATH-bin forms); an empty string never matches anything by accident, so
-// it is a benign placeholder here. The flip side: absolute-path hook installs
-// cannot be claimed from inside this bundle (the library resolves its own
-// package root, which does not exist here) — MATCH_NOTE says so.
+// it is a benign placeholder here. Verified with the import.meta.url shim in
+// place (0.2.0): the bundled library now resolves a real file URL, but its
+// packageRoot() walks up from the BUNDLE's location, where no compressor
+// package exists — describeHookCommand('absolute') throws (cleanly, caught by
+// the adapter), so absolute-path hook installs still cannot be claimed from
+// inside this bundle. MATCH_NOTE stays.
 export const MATCH_NOTE =
   'note: hook detection here matches the relocatable (PATH-bin) command form; ' +
   'absolute-path installs may show as not installed — `compressor status` in a ' +
@@ -72,6 +76,14 @@ export async function buildStatusReport(input: StatusInput): Promise<string> {
         lines.push(`${adapter.name}: status unavailable (${String(error)})`);
       }
     }
+    const steering = await steeringInstalled(input.projectDir);
+    lines.push(
+      `copilot steering (#compressorRead): ${
+        steering
+          ? `installed (${STEERING_RELATIVE_PATH})`
+          : 'not installed — run "Compressor: Enable Copilot Steering"'
+      }`,
+    );
     lines.push('', MATCH_NOTE);
   }
 
@@ -90,9 +102,11 @@ export async function buildStatusReport(input: StatusInput): Promise<string> {
   return lines.join('\n');
 }
 
-export function registerStatusCommand(source: LedgerSource): vscode.Disposable {
-  const channel = vscode.window.createOutputChannel('Compressor');
-  const command = vscode.commands.registerCommand('compressor.status', async () => {
+export function registerStatusCommand(
+  source: LedgerSource,
+  channel: vscode.OutputChannel,
+): vscode.Disposable {
+  return vscode.commands.registerCommand('compressor.status', async () => {
     const report = await buildStatusReport({
       projectDir: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
       homeDir: os.homedir(),
@@ -102,5 +116,4 @@ export function registerStatusCommand(source: LedgerSource): vscode.Disposable {
     channel.appendLine(report);
     channel.show(true);
   });
-  return vscode.Disposable.from(channel, command);
 }

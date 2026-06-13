@@ -33,6 +33,15 @@ async function main() {
         platform: 'node',
         outfile: 'out/extension.js',
         external: ['vscode'],
+        // Standard CJS shim for import.meta.url: the bundled library
+        // (@astudioplus/compressor is ESM) derives paths from import.meta.url,
+        // which esbuild's CJS output otherwise rewrites to `{}` (undefined
+        // .url → TypeError at call time). The banner defines a valid file URL
+        // for the bundle itself.
+        banner: {
+            js: "const import_meta_url = require('url').pathToFileURL(__filename).href;",
+        },
+        define: { 'import.meta.url': 'import_meta_url' },
         logLevel: 'silent',
         plugins: [
             /* add to the end of plugins array */

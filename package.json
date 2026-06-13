@@ -1,14 +1,14 @@
 {
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
-    "description": "Status-bar ticker and report for estimated token savings recorded by the compressor ledger. Read-only: no network calls, reads nothing but the local ledger JSONL.",
-    "version": "0.1.0",
+    "description": "Compressed file-read tool for Copilot agent mode, savings ticker/report, and manage commands for the compressor ledger and instruction packs. No network calls.",
+    "version": "0.2.0",
     "publisher": "aStudioPlus",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
     "license": "MIT",
     "private": false,
     "engines": {
-        "vscode": "^1.90.0"
+        "vscode": "^1.95.0"
     },
     "categories": [
         "Other"
@@ -35,6 +35,31 @@
                 "command": "compressor.status",
                 "title": "Status",
                 "category": "Compressor"
+            },
+            {
+                "command": "compressor.init",
+                "title": "Init (install instruction pack)",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.setMode",
+                "title": "Set Mode",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.uninstall",
+                "title": "Uninstall (remove compressor artifacts)",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.enableSteering",
+                "title": "Enable Copilot Steering",
+                "category": "Compressor"
+            },
+            {
+                "command": "compressor.disableSteering",
+                "title": "Disable Copilot Steering",
+                "category": "Compressor"
             }
         ],
         "configuration": {
@@ -49,23 +74,64 @@
                     ],
                     "default": "30d",
                     "description": "Lookback window for the savings ticker and report."
+                },
+                "compressor.mode": {
+                    "type": "string",
+                    "enum": [
+                        "full",
+                        "optimized",
+                        "slim"
+                    ],
+                    "default": "optimized",
+                    "description": "Compression mode for the compressor_read tool. 'full' disables compression (passthrough); 'optimized' strips comments and dedupes repeated lines; 'slim' additionally filters logs. Omitted content is always marked with a recoverable [compressor:] marker; token figures derived from it are estimates."
                 }
             }
-        }
+        },
+        "languageModelTools": [
+            {
+                "name": "compressor_read",
+                "toolReferenceName": "compressorRead",
+                "displayName": "Compressed File Read",
+                "canBeReferencedInPrompt": true,
+                "modelDescription": "Read a file with automatic token compression: comment-stripping that preserves line numbers, repeated-line deduplication, and recoverable [compressor:] omission markers stating the exact offset/limit to retrieve omitted lines. Use this INSTEAD of the built-in file read tool for files longer than ~200 lines or for log/output files. Pass offset/limit to retrieve an exact range uncompressed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "workspace-relative or absolute file path"
+                        },
+                        "offset": {
+                            "type": "number",
+                            "description": "1-based start line for an exact uncompressed range"
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "line count for the exact range"
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        ]
     },
     "scripts": {
         "vscode:prepublish": "node esbuild.js --production",
         "build": "node esbuild.js",
         "watch": "node esbuild.js --watch",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "test": "vitest run"
+        "test": "vitest run",
+        "package": "vsce package --no-dependencies --allow-missing-repository"
     },
     "dependencies": {
         "@astudioplus/compressor": "file:../compressor"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",
-        "@types/vscode": "~1.90.0",
+        "@types/vscode": "~1.95.0",
+        "@vscode/vsce": "^3.0.0",
         "esbuild": "^0.28.0",
         "typescript": "^6.0.3",
         "vitest": "^4.1.0"
