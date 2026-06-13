@@ -220,6 +220,14 @@
                         }
                     },
                     {
+                        "id": "tools",
+                        "title": "Search and outline",
+                        "description": "Two more agent tools: #compressorSearch finds where code is used, and #compressorOutline shows a file's shape — see the example prompts to the right.",
+                        "media": {
+                            "markdown": "media/walkthrough/tools.md"
+                        }
+                    },
+                    {
                         "id": "savings",
                         "title": "See your savings",
                         "description": "Open the savings report to see how much you've saved.\n[Show Savings](command:compressor.showSavings)",
