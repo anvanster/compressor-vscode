@@ -4,6 +4,9 @@ A practical guide with example prompts. Compressor saves tokens by reading
 large files through a compression engine before they reach the model, and it
 shows you what was saved. It makes no network calls.
 
+New here? Run **Welcome: Open Walkthrough** → **Get started with Compressor**
+for an in-editor tour of the steps below.
+
 ## 1. One-time setup
 
 1. Install the extension (from the Marketplace, or `code --install-extension

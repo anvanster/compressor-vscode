@@ -23,6 +23,10 @@
   tokens, with the saved portion highlighted; the value column no longer
   truncates. Hover a bar for the chars breakdown.
 - **Marketplace icon** (`assets/icon.png`) from the brand mark.
+- **Getting Started walkthrough** (Welcome page → "Get started with
+  Compressor", or run `Welcome: Open Walkthrough`): five steps — what it does,
+  enable steering, read with `#compressorRead`, see your savings, tune/inspect
+  — with buttons that run the matching commands and auto-check as you go.
 - **Usage guide with example prompts** (`docs/USAGE.md`), and sharper model
   guidance for tool invocation — the `compressor_read` `modelDescription` and
   the Copilot steering file now explain when to prefer the tool, how to read an

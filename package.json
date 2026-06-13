@@ -131,6 +131,64 @@
                     ]
                 }
             }
+        ],
+        "walkthroughs": [
+            {
+                "id": "compressor.gettingStarted",
+                "title": "Get started with Compressor",
+                "description": "Compress large file reads in Copilot agent mode, steer the agent toward the tool, and watch your token savings.",
+                "steps": [
+                    {
+                        "id": "welcome",
+                        "title": "What Compressor does",
+                        "description": "Fewer tokens, same work — Compressor shrinks large file reads before they reach the model. No network calls; chars exact, tokens estimated.",
+                        "media": {
+                            "markdown": "media/walkthrough/welcome.md"
+                        }
+                    },
+                    {
+                        "id": "steering",
+                        "title": "Enable Copilot steering",
+                        "description": "Nudge Copilot agent mode toward the compressed read for large files.\n[Enable Steering](command:compressor.enableSteering)",
+                        "media": {
+                            "markdown": "media/walkthrough/steering.md"
+                        },
+                        "completionEvents": [
+                            "onCommand:compressor.enableSteering"
+                        ]
+                    },
+                    {
+                        "id": "read",
+                        "title": "Read with #compressorRead",
+                        "description": "In an agent-mode chat, ask the model to read a large file with #compressorRead — see the example prompts to the right.",
+                        "media": {
+                            "markdown": "media/walkthrough/read.md"
+                        }
+                    },
+                    {
+                        "id": "savings",
+                        "title": "See your savings",
+                        "description": "Open the savings report to see how much you've saved.\n[Show Savings](command:compressor.showSavings)",
+                        "media": {
+                            "markdown": "media/walkthrough/savings.md"
+                        },
+                        "completionEvents": [
+                            "onCommand:compressor.showSavings"
+                        ]
+                    },
+                    {
+                        "id": "tune",
+                        "title": "Tune and inspect",
+                        "description": "Switch compression mode, count tokens, or preview compression.\n[Select Read Compression Mode](command:compressor.selectMode)",
+                        "media": {
+                            "markdown": "media/walkthrough/modes.md"
+                        },
+                        "completionEvents": [
+                            "onCommand:compressor.selectMode"
+                        ]
+                    }
+                ]
+            }
         ]
     },
     "scripts": {

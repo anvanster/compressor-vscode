@@ -48,6 +48,9 @@ read tool's compression mode; `full` = passthrough).
 
 ## Try it
 
+New install? Open the **Get started with Compressor** walkthrough (VS Code
+Welcome page, or run `Welcome: Open Walkthrough`).
+
 After **Compressor: Enable Copilot Steering**, in an agent-mode chat:
 
 ```
