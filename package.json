@@ -1,12 +1,20 @@
 {
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
-    "description": "Compressed file-read tool for Copilot agent mode, savings ticker/report, and manage commands for the compressor ledger and instruction packs. No network calls.",
+    "description": "Save tokens in GitHub Copilot agent mode — compressed read/search/outline tools, a savings ticker & report, and instruction-pack management. No network calls.",
     "version": "0.3.0",
     "publisher": "aStudioPlus",
     "icon": "assets/icon.png",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/anvanster/compressor-vscode.git"
+    },
+    "bugs": {
+        "url": "https://github.com/anvanster/compressor-vscode/issues"
+    },
+    "homepage": "https://github.com/anvanster/compressor-vscode#readme",
     "private": false,
     "engines": {
         "vscode": "^1.95.0"
@@ -259,7 +267,7 @@
         "watch": "node esbuild.js --watch",
         "typecheck": "tsc -p tsconfig.json --noEmit",
         "test": "vitest run",
-        "package": "vsce package --no-dependencies --allow-missing-repository"
+        "package": "vsce package --no-dependencies"
     },
     "dependencies": {
         "@astudioplus/compressor": "file:../compressor"

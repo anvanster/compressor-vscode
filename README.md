@@ -71,7 +71,7 @@ assertions and the final count.
 
 With steering on, the agent also tends to pick `compressor_read` on its own for
 large or log files. More examples and the full command list are in
-`docs/USAGE.md`.
+[`docs/USAGE.md`](docs/USAGE.md).
 
 ## What it does NOT do
 
