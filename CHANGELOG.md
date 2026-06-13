@@ -2,7 +2,8 @@
 
 ## 0.3.0 — 2026-06-12
 
-- **Two more language-model tools** for Copilot agent mode:
+- **Two more language-model tools** for Copilot agent mode, joining
+  `#compressorRead` (three tools total):
   - **`#compressorSearch`** — workspace text/regex search returning compressed
     grep-style results (file, line, match), with `isRegex`, `ignoreCase`,
     `include` glob, and `maxResults`. Oversized result sets are deduped and
