@@ -1,4 +1,4 @@
-# Manual local validation — compressor-vscode 0.2.0
+# Manual local validation — compressor-vscode 0.3.0
 
 Step-by-step checklist for validating the packaged extension on a real
 machine. Run from this repo unless noted. Every token figure you see should be
@@ -7,7 +7,7 @@ marked `≈` or "estimated"; if you ever see a percentage claim, that is a bug.
 ## 1. Install the VSIX
 
 ```sh
-code --install-extension compressor-vscode-0.2.0.vsix
+code --install-extension compressor-vscode-0.3.0.vsix
 ```
 
 **Pass:** install completes; `code --list-extensions` shows
@@ -88,6 +88,38 @@ code --uninstall-extension aStudioPlus.compressor-vscode
 file is intentionally left in the repo (it is workspace content, not extension
 state) — remove it beforehand with **Compressor: Disable Copilot Steering**
 if you do not want it.
+
+## 8. 0.3.0 additions
+
+**Mode indicator (click-to-toggle).** The status bar shows
+`$(fold) compressor: <mode>` next to the savings ticker.
+
+**Pass:** clicking it opens a quickpick (optimized / slim / full, current one
+marked); choosing one updates `compressor.mode` (workspace settings when a
+folder is open) and the indicator text changes.
+
+**Count Tokens.** Open a file (or select a region) and run
+**Compressor: Count Tokens**.
+
+**Pass:** an info message reports exact chars and `≈<n> tokens (estimated,
+chars/3.5 — not billable)`, with scope `file` or `selection`. No percentage.
+
+**Preview Compression.** With `compressor.mode` not `full`, run
+**Compressor: Preview Compression** on a large comment-heavy file.
+
+**Pass:** a side-by-side diff opens (numbered original vs compressed); the
+title states `saved ≈<n> chars (exact)` or, below the floor, that
+`compressor_read` returns it unchanged. Nothing is written to disk. With mode
+`full` the command says compression is off.
+
+**Actual-usage report section.** Open this repo (it has Claude Code
+transcripts) and run **Compressor: Show Savings**.
+
+**Pass:** below the savings charts, an **actual usage (Claude Code
+transcripts)** section lists sessions/turns and input/output/cache token totals
+with a by-model breakdown, labeled *not savings* and not billable dollars.
+Numbers match `compressor stats` in a terminal. In a repo with no Claude Code
+history the section is absent (not an error).
 
 ## Known limitations to expect
 
