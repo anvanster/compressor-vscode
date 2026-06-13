@@ -51,6 +51,16 @@ How to use it well:
   again with the offset and limit the marker states — nothing is lost, only
   deferred.
 - Short files come back unchanged, so there is no downside to preferring it.
+
+## Other compressor tools
+
+- To find where something is defined or used, prefer #tool:compressorSearch
+  over reading whole files — it returns compressed grep-style results (file,
+  line, match). It accepts a regex, an include glob, and a result cap.
+- To understand the shape of a large source file before reading it, use
+  #tool:compressorOutline — it returns imports and signatures with bodies
+  collapsed; then expand a specific body with compressor_read at the offset
+  and limit a marker states.
 `;
 
 export function steeringPath(projectDir: string): string {

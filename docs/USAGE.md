@@ -57,6 +57,35 @@ content keeps original line numbers with comments/repeats collapsed. Any omitted
 span appears inline as a recoverable marker, e.g.
 `[compressor: lines 120-980 omitted — offset=120 limit=860 to retrieve]`.
 
+### Find things with `#compressorSearch`
+
+To locate where something is defined or used without reading whole files, the
+agent can search the workspace and get compressed grep-style results:
+
+```
+Find every call site of `parseConfig` with #compressorSearch and list the files.
+```
+
+```
+Search #compressorSearch for the regex `TODO|FIXME` in src/**/*.ts and group
+them by file.
+```
+
+It accepts a plain string or a regex (`isRegex`), `ignoreCase`, an `include`
+glob, and a `maxResults` cap; large result sets are deduped and truncated with
+a recoverable marker.
+
+### Understand a file with `#compressorOutline`
+
+To see a large source file's shape before reading it, ask for an outline — the
+imports and signatures, with bodies collapsed into recoverable markers
+(TypeScript/JavaScript, Rust, Python, Go):
+
+```
+Outline #compressorOutline src/engine/index.ts, then read the body of compress()
+with #compressorRead at the offset/limit the marker shows.
+```
+
 ### Reading an exact range
 
 When you (or the agent) need a span verbatim, pass `offset` (1-based start line)

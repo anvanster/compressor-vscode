@@ -8,13 +8,21 @@ manage commands for instruction packs. No network calls.
 
 ## Features
 
-- **`compressor_read` tool** (`#compressorRead` in Copilot agent-mode chat):
-  reads a workspace file through the compressor engine — comment-stripping
-  that preserves line numbers, repeated-line dedupe, and recoverable
-  `[compressor:]` omission markers stating the exact `offset`/`limit` to
-  retrieve omitted lines. Pass `offset`/`limit` for an exact uncompressed
-  range. Worthwhile compressions land in the ledger as agent `vscode`.
-  Reads are confined to the open workspace folders.
+- **Three language-model tools** for Copilot agent mode, all confined to the
+  open workspace folders and all recording worthwhile compressions to the
+  ledger as agent `vscode`:
+  - **`#compressorRead`** — reads a file through the engine: comment-stripping
+    that preserves line numbers, repeated-line dedupe, and recoverable
+    `[compressor:]` markers stating the exact `offset`/`limit` to retrieve
+    omitted lines. Pass `offset`/`limit` for an exact uncompressed range.
+  - **`#compressorSearch`** — workspace text/regex search returning compressed
+    grep-style results (file, line, match). Accepts `isRegex`, `ignoreCase`,
+    an `include` glob, and `maxResults`. Find where something is used without
+    reading whole files.
+  - **`#compressorOutline`** — a file's imports and signatures with bodies
+    collapsed into recoverable markers (TypeScript/JavaScript, Rust, Python,
+    Go). Understand a large file's shape cheaply, then expand a body with
+    `#compressorRead`.
 - **Copilot steering** — **Compressor: Enable/Disable Copilot Steering**
   installs/removes an extension-owned
   `.github/instructions/compressor-vscode.instructions.md` nudging agent mode

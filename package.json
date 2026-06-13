@@ -130,6 +130,60 @@
                         "path"
                     ]
                 }
+            },
+            {
+                "name": "compressor_search",
+                "toolReferenceName": "compressorSearch",
+                "displayName": "Compressed Workspace Search",
+                "canBeReferencedInPrompt": true,
+                "modelDescription": "Search the open workspace for a string or regular expression and get grep-style results (file path + line number + matching line) with token compression: repeated lines are deduplicated and oversized result sets are truncated with a recoverable [compressor:] marker. Prefer this over reading whole files when you are looking for where something is defined or used. Inputs: query (required); isRegex (treat query as a JS regex); ignoreCase; include (a glob like 'src/**/*.ts'); maxResults. Results are confined to the open workspace folders.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "text or regular expression to search for"
+                        },
+                        "isRegex": {
+                            "type": "boolean",
+                            "description": "treat query as a JS regular expression"
+                        },
+                        "ignoreCase": {
+                            "type": "boolean",
+                            "description": "case-insensitive match"
+                        },
+                        "include": {
+                            "type": "string",
+                            "description": "glob of files to search, relative to the workspace (e.g. src/**/*.ts)"
+                        },
+                        "maxResults": {
+                            "type": "number",
+                            "description": "maximum number of matches to return"
+                        }
+                    },
+                    "required": [
+                        "query"
+                    ]
+                }
+            },
+            {
+                "name": "compressor_outline",
+                "toolReferenceName": "compressorOutline",
+                "displayName": "Code Outline",
+                "canBeReferencedInPrompt": true,
+                "modelDescription": "Return a code file's structure — top-level imports and signatures (functions, classes, types) — with the bodies collapsed into recoverable [compressor: … offset/limit] markers and line numbers preserved. Use this to understand the shape of a large source file cheaply before reading specific parts; then use compressor_read with the offset/limit a marker states to expand a body you need. Supports TypeScript/JavaScript, Rust, Python, and Go; other file types return a note telling you to use compressor_read. Input: path (workspace-relative or absolute). Confined to the open workspace folders.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "workspace-relative or absolute file path"
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
             }
         ],
         "walkthroughs": [

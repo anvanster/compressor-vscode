@@ -2,6 +2,15 @@
 
 ## 0.3.0 — 2026-06-12
 
+- **Two more language-model tools** for Copilot agent mode:
+  - **`#compressorSearch`** — workspace text/regex search returning compressed
+    grep-style results (file, line, match), with `isRegex`, `ignoreCase`,
+    `include` glob, and `maxResults`. Oversized result sets are deduped and
+    truncated with a recoverable marker; workspace-confined.
+  - **`#compressorOutline`** — a file's imports and signatures with bodies
+    collapsed into recoverable `[compressor: …]` markers (TypeScript/JavaScript,
+    Rust, Python, Go; other types return a note to use `#compressorRead`).
+  The Copilot steering file now describes all three tools.
 - **Click-to-toggle mode indicator**: a status-bar item (`$(fold) compressor:
   <mode>`) shows the read-tool compression mode and opens a quickpick to change
   it — sets `compressor.mode` at the workspace level (global when no folder is

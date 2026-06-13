@@ -4,6 +4,8 @@ import { SavingsTicker } from './ticker';
 import { SavingsPanel } from './savings-panel';
 import { registerStatusCommand } from './status';
 import { registerReadTool } from './tools/read';
+import { registerSearchTool } from './tools/search';
+import { registerOutlineTool } from './tools/outline';
 import { registerSteeringCommands } from './steering';
 import { registerManageCommands } from './manage';
 import { ModeStatusItem, registerSelectModeCommand } from './mode-status';
@@ -34,6 +36,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('compressor.showSavings', () => panel.show()),
     registerStatusCommand(source, channel),
     registerReadTool(),
+    registerSearchTool(),
+    registerOutlineTool(),
     registerSteeringCommands(),
     registerManageCommands(channel),
     registerSelectModeCommand(),
