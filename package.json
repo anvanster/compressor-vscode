@@ -109,7 +109,7 @@
                 "toolReferenceName": "compressorRead",
                 "displayName": "Compressed File Read",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Read a file with automatic token compression: comment-stripping that preserves line numbers, repeated-line deduplication, and recoverable [compressor:] omission markers stating the exact offset/limit to retrieve omitted lines. Use this INSTEAD of the built-in file read tool for files longer than ~200 lines or for log/output files. Pass offset/limit to retrieve an exact range uncompressed.",
+                "modelDescription": "Read a workspace file with automatic token compression. Preserves line numbers; collapses comments and repeated lines; marks any omitted span inline as [compressor: … offset=N limit=M to retrieve]. Prefer this over the built-in file read for files longer than ~200 lines and for logs or build output. Read the whole file first and let it collapse the noise. To read an exact range uncompressed, pass offset (1-based start line) and limit (line count). If a [compressor: …] marker hides a span you need, call again with the offset/limit it states — nothing is lost, only deferred. Short files are returned unchanged, so there is no downside to preferring it.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -19,6 +19,15 @@
   actual usage, **not savings** and not billable dollars; Claude Code only.
 - The savings report adapts to the active VS Code color theme (colors and font
   from `--vscode-*` variables; standalone `--html` unchanged in a browser).
+- **Two-tone savings bars**: each bar's full length is the total original
+  tokens, with the saved portion highlighted; the value column no longer
+  truncates. Hover a bar for the chars breakdown.
+- **Marketplace icon** (`assets/icon.png`) from the brand mark.
+- **Usage guide with example prompts** (`docs/USAGE.md`), and sharper model
+  guidance for tool invocation — the `compressor_read` `modelDescription` and
+  the Copilot steering file now explain when to prefer the tool, how to read an
+  exact range (offset/limit), and how to recover an omitted `[compressor: …]`
+  span. Validation checklist moved to the gitignored `internal/`.
 
 ## 0.2.0 — 2026-06-12
 

@@ -46,6 +46,22 @@ Settings: `compressor.savingsWindow` (`7d` | `30d` | `all`, default `30d`),
 `compressor.mode` (`full` | `optimized` | `slim`, default `optimized` — the
 read tool's compression mode; `full` = passthrough).
 
+## Try it
+
+After **Compressor: Enable Copilot Steering**, in an agent-mode chat:
+
+```
+Read #compressorRead src/server/router.ts and explain the route table.
+```
+```
+Summarize the failures in #compressorRead logs/test-run.txt — just the failing
+assertions and the final count.
+```
+
+With steering on, the agent also tends to pick `compressor_read` on its own for
+large or log files. More examples and the full command list are in
+`docs/USAGE.md`.
+
 ## What it does NOT do
 
 - It **cannot compress VS Code Copilot's built-in tool output**. VS Code hooks
@@ -65,11 +81,11 @@ read tool's compression mode; `full` = passthrough).
 Not on the marketplace. Package locally and install:
 
 ```sh
-npm run package            # produces compressor-vscode-0.2.0.vsix
-code --install-extension compressor-vscode-0.2.0.vsix
+npm run package            # produces compressor-vscode-0.3.0.vsix
+code --install-extension compressor-vscode-0.3.0.vsix
 ```
 
-Manual validation checklist: see `VALIDATION.md` in the repo.
+Usage guide and example prompts: `docs/USAGE.md`.
 
 ## Development
 

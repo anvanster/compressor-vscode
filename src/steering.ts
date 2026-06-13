@@ -29,9 +29,28 @@ description: Prefer the compressed file-read tool for large files (compressor-vs
 applyTo: "**"
 ---
 
-For files longer than ~200 lines and for log or build-output files, use the
-#tool:compressorRead tool (compressor_read) instead of the built-in file read
-tool. For an exact line range, pass offset and limit.
+# Reading files with compressor
+
+When you need to read a file's contents, prefer the #tool:compressorRead tool
+(compressor_read) over the built-in file read for:
+
+- files longer than ~200 lines, and
+- logs, build output, or other repetitive / generated text.
+
+It returns the file with line numbers preserved, comments and repeated lines
+collapsed, and any omitted span marked inline as \`[compressor: … offset=N
+limit=M to retrieve]\`. Because line numbers are unchanged, you can still cite
+and edit by line.
+
+How to use it well:
+
+- Read the whole file first; let compressor collapse the noise.
+- To read an exact, uncompressed range, pass offset (1-based start line) and
+  limit (line count).
+- If a \`[compressor: …]\` marker hides a span you actually need, call the tool
+  again with the offset and limit the marker states — nothing is lost, only
+  deferred.
+- Short files come back unchanged, so there is no downside to preferring it.
 `;
 
 export function steeringPath(projectDir: string): string {
