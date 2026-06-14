@@ -1,6 +1,14 @@
+import { mkdtempSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+
+// runManage applies for real via applyWithBackup; redirect its backups to a
+// throwaway dir so the suite never writes to the user's ~/.compressor/backups.
+process.env.COMPRESSOR_BACKUP_DIR = mkdtempSync(
+  path.join(os.tmpdir(), 'compressor-vscode-manage-backups-'),
+);
 import type { AdapterContext, AgentName } from '@astudioplus/compressor';
 import {
   AGENT_EFFECT_NOTES,

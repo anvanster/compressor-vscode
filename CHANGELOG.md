@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3 — 2026-06-14
+
+- **Manage commands back up before changing files.** Init / Set Instruction-Pack
+  Mode / Uninstall now save the prior state of every file they change (via the
+  library's `applyWithBackup`, under `~/.compressor/backups`) before writing —
+  undo a change from a terminal with `compressor restore`. The modal
+  confirmation is unchanged.
+- Depend on `@astudioplus/compressor` `^0.3.3` (adds the backup/restore APIs and
+  the `compressor restore` CLI command).
+
 ## 0.3.0 — 2026-06-12
 
 - **Two more language-model tools** for Copilot agent mode, joining

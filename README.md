@@ -51,8 +51,10 @@ calls.
   folder, steering state, and ledger recency.
 - **Compressor: Init / Set Instruction-Pack Mode / Uninstall** — plan
   instruction-pack changes with the library adapters, review the rendered diff,
-  confirm, apply. claude-code/copilot (hook-bearing) are offered only when
-  `compressor-hook` resolves on PATH; otherwise use the `compressor` CLI.
+  confirm, apply. Changed files are backed up first (under `~/.compressor/backups`)
+  — undo from a terminal with `compressor restore`. claude-code/copilot
+  (hook-bearing) are offered only when `compressor-hook` resolves on PATH;
+  otherwise use the `compressor` CLI.
 
 Settings: `compressor.savingsWindow` (`7d` | `30d` | `all`, default `30d`),
 `compressor.mode` (`full` | `optimized` | `slim`, default `optimized` — the

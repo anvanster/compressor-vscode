@@ -2,7 +2,7 @@
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
     "description": "Save tokens in GitHub Copilot agent mode — compressed read/search/outline tools, a savings ticker & report, and instruction-pack management. No network calls.",
-    "version": "0.3.0",
+    "version": "0.3.3",
     "publisher": "aStudioPlus",
     "icon": "assets/icon.png",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
@@ -275,7 +275,7 @@
         "package": "vsce package --no-dependencies"
     },
     "dependencies": {
-        "@astudioplus/compressor": "^0.3.1"
+        "@astudioplus/compressor": "^0.3.3"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

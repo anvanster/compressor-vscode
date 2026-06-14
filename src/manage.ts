@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import os from 'node:os';
 import {
   adapters,
-  applyChanges,
+  applyWithBackup,
   getAdapter,
   renderChanges,
   resolveHookCommand,
@@ -11,7 +11,7 @@ import type { AdapterContext, AgentName, FileChange } from '@astudioplus/compres
 
 // Manage commands: init / set-mode / uninstall via the library's pure-planner
 // adapters. Every change set is rendered for review and confirmed before
-// applyChanges writes anything.
+// applyWithBackup backs up the prior state and writes.
 
 export type ManageKind = 'init' | 'setMode' | 'uninstall';
 export type PickMode = 'optimized' | 'slim';
@@ -194,12 +194,23 @@ export async function runManage(kind: ManageKind, env: ManageEnv, ui: ManageUi):
     if (!ok) {
       return;
     }
-    await applyChanges(plan.changes);
+    // applyWithBackup saves the prior state of every changed file first
+    // (under ~/.compressor/backups) so the change can be undone with
+    // `compressor restore`; the modal confirmation above is the warning.
+    const result = await applyWithBackup(plan.changes, {
+      command: kind === 'uninstall' ? 'uninstall' : `${kind} ${mode ?? ''}`.trim(),
+    });
+    const backupNote =
+      result.backupPath === undefined ? '' : ' Backup saved (undo with `compressor restore`).';
 
     if (kind === 'uninstall' || mode === 'full') {
-      ui.info(`Compressor: artifacts removed for ${agents.join(', ')}. ${effectNote(agents)}`);
+      ui.info(
+        `Compressor: artifacts removed for ${agents.join(', ')}. ${effectNote(agents)}${backupNote}`,
+      );
     } else {
-      ui.info(`Compressor: mode ${mode} installed for ${agents.join(', ')}. ${effectNote(agents)}`);
+      ui.info(
+        `Compressor: mode ${mode} installed for ${agents.join(', ')}. ${effectNote(agents)}${backupNote}`,
+      );
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
