@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.4 — 2026-06-18
+
+- **Copilot steering now forces the compressor tools, not just nudges.**
+  **Compressor: Enable Copilot Steering** installs a custom **compressor** agent
+  (`.github/agents/compressor.agent.md`) and a **/compressor** prompt
+  (`.github/prompts/compressor.prompt.md`) whose `tools:` allowlist leaves the
+  built-in file read and codebase search out of scope — pick the agent from the
+  Chat agents dropdown (or run `/compressor`) and every read/search goes through
+  `#compressorRead` / `#compressorSearch` / `#compressorOutline`. VS Code has no
+  API to force tool choice in the default agent, so this is the deterministic
+  path; the default agent is still only nudged.
+- **The always-on nudge moved into a marker-fenced section of
+  `.github/copilot-instructions.md`** (replacing the separate, routinely-ignored
+  `.github/instructions/compressor-vscode.instructions.md`). The section is
+  fenced in distinct `compressor-vscode:steering` comments, so it updates and
+  removes cleanly and coexists with a `compressor init` instruction-pack section
+  in the same file. **Disable Copilot Steering** removes all three artifacts.
+- Tightened the three tools' `modelDescription`s so the default agent reaches
+  for them more readily.
+
 ## 0.3.3 — 2026-06-14
 
 - **Manage commands back up before changing files.** Init / Set Instruction-Pack

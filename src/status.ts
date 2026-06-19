@@ -3,7 +3,7 @@ import os from 'node:os';
 import { adapters } from '@astudioplus/compressor';
 import type { AdapterContext } from '@astudioplus/compressor';
 import type { LedgerSource } from './ledger-source';
-import { STEERING_RELATIVE_PATH, steeringInstalled } from './steering';
+import { STEERING_PRIMARY_RELATIVE_PATH, steeringInstalled } from './steering';
 
 // "Compressor: Status" — per-adapter install status for the first workspace
 // folder plus ledger recency, ending with the honesty line. Read-only: the
@@ -78,9 +78,10 @@ export async function buildStatusReport(input: StatusInput): Promise<string> {
     }
     const steering = await steeringInstalled(input.projectDir);
     lines.push(
-      `copilot steering (#compressorRead): ${
+      `copilot steering (compressor agent + /compressor): ${
         steering
-          ? `installed (${STEERING_RELATIVE_PATH})`
+          ? `installed (${STEERING_PRIMARY_RELATIVE_PATH}) — pick the "compressor" ` +
+            'agent from the Chat agents dropdown; spot-check Configure Tools shows no built-in read'
           : 'not installed — run "Compressor: Enable Copilot Steering"'
       }`,
     );

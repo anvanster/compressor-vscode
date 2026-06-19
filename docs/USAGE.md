@@ -12,9 +12,13 @@ for an in-editor tour of the steps below.
 1. Install the extension (from the Marketplace, or `code --install-extension
    compressor-vscode-<version>.vsix`).
 2. Run **Compressor: Enable Copilot Steering** (Command Palette → type
-   "Compressor"). This writes `.github/instructions/compressor-vscode.instructions.md`,
-   which nudges Copilot agent mode to reach for the compressed read tool on
-   large files. It's steering, not enforcement — the built-in read still works.
+   "Compressor"). This writes a **compressor** custom agent
+   (`.github/agents/compressor.agent.md`) and a **/compressor** prompt
+   (`.github/prompts/compressor.prompt.md`) whose toolset leaves the built-in
+   read out — pick the agent from the Chat agents dropdown (or run /compressor)
+   and every read goes through the compressor tools. It also adds a marker-fenced
+   nudge to `.github/copilot-instructions.md` for the default agent (advisory —
+   VS Code can't force tool choice, so the agent/prompt are the real lever).
 3. (Optional) Pick a compression level with the status-bar **`compressor: <mode>`**
    item, or **Compressor: Select Read Compression Mode**: `optimized` (default —
    strip comments + dedupe repeated lines), `slim` (also filter logs), or `full`

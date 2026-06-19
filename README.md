@@ -27,10 +27,21 @@ calls.
     Go). Understand a large file's shape cheaply, then expand a body with
     `#compressorRead`.
 - **Copilot steering** — **Compressor: Enable/Disable Copilot Steering**
-  installs/removes an extension-owned
-  `.github/instructions/compressor-vscode.instructions.md` nudging agent mode
-  toward `#compressorRead` for files longer than ~200 lines and log/output
-  files. Steering, not enforcement.
+  installs/removes three extension-owned files. VS Code has no API to force tool
+  choice or override the built-in read, and instructions don't route tools, so
+  the deterministic lever is a `tools:` allowlist that omits the built-in read:
+  - `.github/agents/compressor.agent.md` — a **custom agent** ("compressor")
+    whose toolset is the compressor read/search/outline tools plus edit, with
+    the built-in read/codebase-search left out. Pick it from the Chat agents
+    dropdown and every read in that session goes through the compressor tools.
+  - `.github/prompts/compressor.prompt.md` — the **`/compressor`** prompt, the
+    same scoping for one-shot tasks.
+  - a marker-fenced section in `.github/copilot-instructions.md` — a best-effort
+    nudge for the *default* agent (instructions are advisory for tool routing,
+    so this alone is unreliable; the agent/prompt are the real lever). It is
+    fenced in distinct `compressor-vscode:steering` comments so it updates and
+    removes cleanly and coexists with a `compressor init` pack section in the
+    same file.
 - **Ticker** (status bar): `≈12.3k tok saved (30d)` — estimated tokens saved
   in the configured window. Chars are exact; token figures are estimates from
   the cheap estimator, never billable counts. Click it for the report.
@@ -67,7 +78,10 @@ transcript usage section in the report).
 New install? Open the **Get started with Compressor** walkthrough (VS Code
 Welcome page, or run `Welcome: Open Walkthrough`).
 
-After **Compressor: Enable Copilot Steering**, in an agent-mode chat:
+After **Compressor: Enable Copilot Steering**, the strongest path is to pick the
+**compressor** agent from the Chat agents dropdown (or run **/compressor**) — the
+built-in read is out of scope there, so the agent must use the compressor tools.
+You can also `#`-reference them explicitly in any agent-mode chat:
 
 ```
 Read #compressorRead src/server/router.ts and explain the route table.
@@ -77,8 +91,9 @@ Summarize the failures in #compressorRead logs/test-run.txt — just the failing
 assertions and the final count.
 ```
 
-With steering on, the agent also tends to pick `compressor_read` on its own for
-large or log files. More examples and the full command list are in
+In the *default* agent the model only *tends* to pick `compressor_read` on its
+own (no API forces it); the compressor agent and `/compressor` make it
+deterministic. More examples and the full command list are in
 [`docs/USAGE.md`](docs/USAGE.md).
 
 ## What it does NOT do
