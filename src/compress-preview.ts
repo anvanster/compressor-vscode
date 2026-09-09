@@ -1,10 +1,9 @@
 import * as vscode from 'vscode';
-import { cheapEstimator, compress, policyFor } from '@astudioplus/compressor';
-import type { CompressMeta, Mode } from '@astudioplus/compressor';
+import type { Mode } from '@astudioplus/compressor';
+import { readCandidate } from './tools/output-policy';
 import {
   MIN_SAVED_CHARS,
   MIN_SAVED_RATIO,
-  lengthSansMarkers,
   normalizeMode,
   numberLines,
 } from './tools/read';
@@ -14,12 +13,12 @@ import {
 // mode, and worthwhile floor) and opens a side-by-side diff: numbered original
 // vs compressed. A safe way to see and tune what the engine does, with no file
 // writes. Honesty: omissions carry recoverable [compressor:] markers; saved
-// chars are exact (marker-exclusive), token figures elsewhere are estimates.
+// chars include recovery markers, token figures elsewhere are estimates.
 
 export interface CompressionPreview {
   numberedOriginal: string;
   compressed: string;
-  /** marker-exclusive saved chars, mirroring the hook/read-tool measurement */
+  /** Original minus complete output characters, including markers. */
   savedChars: number;
   /** clears the same floor the read tool uses (≥200 chars AND ≥10%) */
   worthwhile: boolean;
@@ -39,9 +38,9 @@ export function previewCompression(
     lines.pop(); // drop the trailing empty segment from a final newline (cat -n parity)
   }
   const numbered = numberLines(lines, 1);
-  const meta: CompressMeta = { tool: 'read', mode, filePath, targeted: false };
-  const result = compress(numbered, meta, policyFor(mode), cheapEstimator);
-  const saved = numbered.length - lengthSansMarkers(result.content);
+  const candidate = readCandidate(lines, filePath ?? 'unknown.txt', mode, false);
+  const result = { content: candidate, stats: { transforms: candidate === numbered ? [] : [{ id: 'numbered-dedupe' }] } };
+  const saved = numbered.length - result.content.length;
   return {
     numberedOriginal: numbered,
     compressed: result.content,

@@ -1,5 +1,6 @@
 # everything ships from the esbuild bundle in out/ (plus icon.png + docs)
 src/**
+.github/**
 tests/**
 node_modules/**
 out/*.map
@@ -8,6 +9,7 @@ tsconfig.json
 vitest.config.ts
 internal/**
 docs/**
+!docs/USAGE.md
 assets/icon.svg
 assets/icon-256.png
 .gitignore

@@ -6,6 +6,7 @@ import { registerStatusCommand } from './status';
 import { registerReadTool } from './tools/read';
 import { registerSearchTool } from './tools/search';
 import { registerOutlineTool } from './tools/outline';
+import { registerExecuteTools } from './tools/execute';
 import { registerSteeringCommands } from './steering';
 import { registerManageCommands } from './manage';
 import { ModeStatusItem, registerSelectModeCommand } from './mode-status';
@@ -38,6 +39,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerReadTool(),
     registerSearchTool(),
     registerOutlineTool(),
+    registerExecuteTools(() => { void ticker.refresh(); }),
     registerSteeringCommands(),
     registerManageCommands(channel),
     registerSelectModeCommand(),

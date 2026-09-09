@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { readFile } from 'node:fs/promises';
+import { readWorkspaceFile } from './workspace-file';
 import {
   appendLedger,
   cheapEstimator,
@@ -9,6 +9,10 @@ import {
 import type { CompressMeta } from '@astudioplus/compressor';
 import { normalizeMode, numberLines, resolveWorkspacePath } from './read';
 import type { ReadToolDeps } from './read';
+import { documentSymbols, formatSymbols } from './symbols';
+import type { CodeSymbol } from './symbols';
+import { selectOutput, fitOutput } from './output-policy';
+import { measureOperation } from '../operation-metrics';
 
 // The compressor_outline languageModelTools tool: returns a code file's
 // structure — top-level imports and signatures — with the bodies collapsed
@@ -43,14 +47,14 @@ export async function runOutlineTool(
       return { text: resolved.error.replace('compressor_read', 'compressor_outline'), isError: true, outlined: false };
     }
     const lang = langFromPath(resolved.absPath);
-    if (lang === undefined) {
+    if (lang === undefined && deps.symbols === undefined && deps.readFile !== undefined) {
       return {
         text: `compressor_outline: no outline for this file type — use compressor_read for ${input.path}`,
         isError: false,
         outlined: false,
       };
     }
-    const read = deps.readFile ?? ((p: string) => readFile(p, 'utf8'));
+    const read = deps.readFile ?? ((file: string) => readWorkspaceFile(file, deps.workspaceFolders));
     let raw: string;
     try {
       raw = await read(resolved.absPath);
@@ -64,6 +68,25 @@ export async function runOutlineTool(
       allLines.pop();
     }
     const numbered = numberLines(allLines, 1);
+    if (deps.cancelled?.()) throw new Error('Operation cancelled');
+    let symbols: CodeSymbol[];
+    try { symbols = await (deps.symbols ?? (deps.readFile ? async () => [] : documentSymbols))(resolved.absPath); }
+    catch { symbols = []; }
+    if (symbols.length > 0) {
+      const formatted = formatSymbols(symbols);
+      const candidate = await fitOutput(formatted, deps, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
+      const content = await selectOutput(numbered, candidate, deps);
+      if (content !== numbered) {
+        void appendLedger({
+          ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
+          charsIn: numbered.length, charsOut: content.length,
+          estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(content),
+          transforms: ['symbol-outline'],
+        }).catch(() => {});
+      }
+      return { text: content, isError: false, outlined: content !== numbered };
+    }
+    if (lang === undefined) return { text: 'No symbol provider available; use compressor_read with an exact range.', isError: false, outlined: false };
 
     const meta: CompressMeta = {
       tool: 'read',
@@ -72,6 +95,9 @@ export async function runOutlineTool(
       targeted: false,
     };
     const result = skeleton(numbered, lang, meta, cheapEstimator);
+    if (result.content !== numbered && await selectOutput(numbered, result.content, deps) === numbered) {
+      return { text: numbered, isError: false, outlined: false };
+    }
     if (result.content === numbered || result.transform === undefined) {
       // signature model exists but produced no collapse (tiny file, or all
       // top-level declarations) — the full numbered file IS the outline
@@ -113,8 +139,13 @@ export function registerOutlineTool(): vscode.Disposable {
     prepareInvocation(options) {
       return { invocationMessage: `Outlining ${options.input.path}` };
     },
-    async invoke(options) {
-      const outcome = await runOutlineTool(options.input, depsFromVscode());
+    async invoke(options, token) {
+      const outcome = await measureOperation('outline', false, () => runOutlineTool(options.input, {
+        ...depsFromVscode(),
+        tokenBudget: options.tokenizationOptions?.tokenBudget,
+        countTokens: options.tokenizationOptions ? (text) => options.tokenizationOptions!.countTokens(text, token) : undefined,
+        cancelled: () => token.isCancellationRequested,
+      }), (result) => result);
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(outcome.text),
       ]);

@@ -1,8 +1,12 @@
 # Using Compressor in VS Code
 
-A practical guide with example prompts. Compressor saves tokens by reading
-large files through a compression engine before they reach the model, and it
-shows you what was saved. It makes no network calls.
+A practical guide for the current development build. Compressor can reduce
+tool-output traffic before it reaches the model. Source reads preserve comments;
+search and command summaries can omit content with recovery guidance. Output
+reduction is not a measurement of net chat or billed-token savings.
+
+The tools do not upload workspace content themselves. Commands you approve can
+modify files and access the network. Marketplace releases may lag this guide.
 
 New here? Run **Welcome: Open Walkthrough** → **Get started with Compressor**
 for an in-editor tour of the steps below.
@@ -20,9 +24,13 @@ for an in-editor tour of the steps below.
    nudge to `.github/copilot-instructions.md` for the default agent (advisory —
    VS Code can't force tool choice, so the agent/prompt are the real lever).
 3. (Optional) Pick a compression level with the status-bar **`compressor: <mode>`**
-   item, or **Compressor: Select Read Compression Mode**: `optimized` (default —
-   strip comments + dedupe repeated lines), `slim` (also filter logs), or `full`
-   (off).
+  item, or **Compressor: Select Read Compression Mode**: `optimized` (default,
+  preserve source and dedupe repeated log lines), `slim` (preserve source and
+  compact search), or `full` (uncompressed reads/search). Explicit outline and
+  command-summary tools still summarize in full mode.
+4. After installing a development VSIX, run **Developer: Reload Window** and
+  start a new chat. Regenerate steering explicitly if existing agent/prompt
+  files list only older tools; installation does not rewrite those files.
 
 ## 2. The `#compressorRead` tool (Copilot agent mode)
 
@@ -56,10 +64,11 @@ Read logs/build.log and tell me why the build failed.
 Open src/engine/index.ts and walk me through compress().
 ```
 
-What you'll see: the tool invocation reads `... (compressed)`, and the returned
-content keeps original line numbers with comments/repeats collapsed. Any omitted
-span appears inline as a recoverable marker, e.g.
-`[compressor: lines 120-980 omitted — offset=120 limit=860 to retrieve]`.
+Returned content keeps original line numbers. Source code and comments are
+preserved; repeated log lines may collapse into a marker with an exact
+`offset`/`limit` recovery range. A tool invocation labeled “compressed” does not
+mean the response actually shrank. Whole-file reads can honor a host budget;
+explicit ranges and symbol reads remain exact.
 
 ### Find things with `#compressorSearch`
 
@@ -75,20 +84,65 @@ Search #compressorSearch for the regex `TODO|FIXME` in src/**/*.ts and group
 them by file.
 ```
 
-It accepts a plain string or a regex (`isRegex`), `ignoreCase`, an `include`
-glob, and a `maxResults` cap; large result sets are deduped and truncated with
-a recoverable marker.
+It accepts `query`, `isRegex`, `ignoreCase`, `include`, `root`, `maxResults`,
+`skip`, `output` (`content`, `files`, `count`), and `contextLines` (0-5, default 0).
+Use an absolute open workspace root when folder names are ambiguous.
+
+```text
+Use #compressorSearch with query="fitMatchPage", root="compressor-vscode",
+include="src/tools/search.ts", contextLines=2, and maxResults=5.
+Explain the matching code using the returned context before requesting reads.
+```
+
+```text
+Use #compressorSearch with query="TODO|FIXME", isRegex=true,
+root="compressor-vscode", include="src/**/*.ts", and output="files".
+Report only the files found in the scanned scope.
+```
+
+```text
+Find "fitMatchPage" with #compressorSearch in compressor-vscode,
+include="src/tools/search.ts", maxResults=1. Follow the returned skip value
+with unchanged inputs to retrieve the next page; do not guess the next offset.
+```
+
+Context windows merge where they overlap. `→` marks selected matching lines;
+`|` marks surrounding lines, which do not increase match counts or advance
+`skip`. Files/count output ignores context. Compact counts are page-local and
+one file can appear on multiple pages. Pagination assumes unchanged files.
+
+Regex evaluation runs in a worker with a one-second per-file deadline and
+cancellation. A timeout is an error, not a no-match result. Narrow the pattern
+or use literal matching if it times out. Discovery is bounded and excludes
+generated/dependency directories; partial-scan warnings mean counts are not
+exhaustive.
+
+Host-budget trimming preserves complete match windows and gives a continuation
+based on represented matches. If no window fits, reduce context or use an exact
+read. Other compression markers may instead ask you to narrow the search.
+Follow the response's recovery guidance rather than advancing past omitted
+matches. Budgets are optional host hints, not a `compressorSearch` input.
 
 ### Understand a file with `#compressorOutline`
 
-To see a large source file's shape before reading it, ask for an outline — the
-imports and signatures, with bodies collapsed into recoverable markers
-(TypeScript/JavaScript, Rust, Python, Go):
+Outlines prefer the installed language provider's symbols, including nested
+methods, details and exact ranges. Without a provider, a basic outline fallback
+supports TypeScript/JavaScript, Rust, Python and Go. Provider availability varies
+by language extension; an outline is not guaranteed to contain every symbol.
 
 ```
 Outline #compressorOutline src/engine/index.ts, then read the body of compress()
 with #compressorRead at the offset/limit the marker shows.
 ```
+
+```text
+Use #compressorOutline on src/tools/regex-scanner.ts in compressor-vscode.
+Then use #compressorRead with symbol="RegexScanner.scan" to inspect its body.
+If the symbol provider is unavailable, use an exact offset/limit range instead.
+```
+
+Symbol names must resolve uniquely. Do not combine `symbol` with `offset` or
+`limit`; use a qualified name when multiple methods have the same name.
 
 ### Reading an exact range
 
@@ -103,20 +157,52 @@ truncation rule exactly.
 ### Recovering an omitted span
 
 If a `[compressor: …]` marker hides something the agent needs, it can call the
-tool again with the offset/limit the marker states — no information is lost,
-just deferred. You can also nudge it:
+tool again with the offset/limit the marker states. Recovery reads the current
+file, not a snapshot, so intervening edits can change the contents. You can also
+nudge it:
 
 ```
 That section was compressed — re-read #compressorRead src/big.ts at the offset
 and limit the marker gave, and show me those lines.
 ```
 
-## 3. See what you're saving
+## 3. Commands and retained logs
 
-- The status bar shows **`≈<n> tok saved`** for the configured window. Click it
+Use `#compressorExecute` for noninteractive tests/builds in a trusted workspace.
+Review the command and working directory at confirmation: workspace validation
+is not a process sandbox. `timeoutSeconds` defaults to 120 and accepts 1-600.
+
+```text
+Use #compressorExecute in /home/jason/projects/compressor-vscode to run
+"env -u COMPRESSOR_NO_LEDGER npm test -- tests/search-tool.test.ts" with
+timeoutSeconds=120. Inspect the exit status. If diagnostics were omitted, use
+#compressorLog with the returned ID instead of rerunning the command.
+```
+
+The response includes exit status and a retained log ID. The **Compressor
+Commands** Output channel shows captured output without adding it to chat.
+Summaries remove passing-test rows when a supported test summary is detected;
+short command output may grow because of status and recovery metadata.
+
+```text
+Use #compressorLog with the ID returned by the previous command, offset=1,
+limit=100. Inspect the original failure block and report its file and line.
+If the selected range is character-capped, follow its characterOffset guidance.
+```
+
+Logs are held in this window's memory for up to 30 minutes and the last five
+commands. Reloading clears them. Output capture stops at 2 MB, so a capped log
+is only the captured portion. Retrieval accepts `offset` >= 1, `limit` 1-500
+and optional `characterOffset` >= 0. Retrieving a log adds traffic; it is not
+recorded as savings. Linux cancellation is tested; Windows process-tree cleanup
+remains a limitation.
+
+## 4. Understand the report
+
+- The status bar shows **`≈<n> tok reduced`** for the configured lookback. Click it
   (or run **Compressor: Show Savings**) to open the report.
 - The report's bars are two-tone: the **full bar is the total original tokens**,
-  the **bright segment is what compressor saved**, broken down by day, agent,
+  the **bright segment is estimated output reduction**, broken down by day, agent,
   tool, and mode. The **by agent** view separates Copilot (VS Code) from Claude
   Code and any other surfaces sharing the ledger. Hover a bar for the exact
   chars breakdown.
@@ -125,11 +211,14 @@ and limit the marker gave, and show me those lines.
   project's Claude Code session transcripts — real usage, *not savings* and not
   billable dollars (Claude Code only).
 
-Token figures from compressor are estimates (the cheap chars/3.5 estimator);
-character counts are exact. Measured savings come from `compressor benchmark`,
-not this view — and there are no percentage claims anywhere.
+Ledger token figures use the cheap chars/3.5 estimator; recorded character
+counts are exact. The ledger can include other agents and sessions. Window-local
+operation counters track calls, output size, duration and errors, not chat
+identity, and reset on reload. Reopen Show Savings to refresh an open report.
+Neither view measures net context growth or billed savings; those require
+controlled task comparisons including follow-up reads and log retrieval.
 
-## 4. Other commands
+## 5. Other commands
 
 | Command | What it does |
 |---|---|
@@ -137,19 +226,22 @@ not this view — and there are no percentage claims anywhere.
 | **Preview Compression** | Side-by-side diff of the active file/selection vs. what `compressor_read` would return. No file writes. |
 | **Status** | Per-adapter install status, steering state, and ledger recency. |
 | **Init / Set Instruction-Pack Mode / Uninstall** | Install/switch/remove the compressor instruction packs for agents, with a confirmation diff. |
-| **Enable / Disable Copilot Steering** | Add/remove the steering instructions file. |
+| **Enable / Disable Copilot Steering** | Manage extension-owned agent/prompt files and the fenced instructions section; select a root in multi-root workspaces. |
 
 Example: select a noisy log region in the editor, run **Preview Compression**,
-and watch the right pane shrink — that's exactly what the agent would receive.
+and compare numbered output. Preview uses the same read content policy, but
+does not simulate the model host's token budget or tokenizer.
 
-## 5. What it can't do
+## 6. Limits
 
 - It **cannot compress Copilot's built-in tool output**. VS Code hooks can't
   replace tool results (verified), so in-editor compression happens only when
-  the agent uses `#compressorRead`.
-- It reads no file contents beyond the ledger, this project's Claude Code
-  transcripts (for the usage report), and files you/the agent request through
-  `compressor_read`, Preview, or Count.
+  the agent uses Compressor tools. Built-in terminal commands bypass command
+  summaries and their reduction records.
+- Read/outline access is confined to canonical workspace paths and regular text
+  files up to 8 MB. Search reads discovered files in the selected scope and
+  applies additional file/size caps. Approved commands can access resources
+  outside that scope; do not treat them as confined file reads.
 - Instruction packs reach Copilot through `.github/copilot-instructions.md` /
   `AGENTS.md` — see the [compressor docs](https://github.com/anvanster/compressor).
 

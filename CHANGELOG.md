@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — 2026-09-08
+
+- Added confirmed `#compressorExecute` commands with exit status, bounded
+  capture, diagnostic test summaries, an Output channel, and in-memory retained
+  logs recoverable through `#compressorLog` without rerunning commands.
+- Source reads now preserve code and semantic comments, reject output growth,
+  support exact qualified-symbol reads, and use canonical workspace paths.
+  Outlines prefer language-provider symbols and exact ranges.
+- Expanded `#compressorSearch` with multi-root scoping, files/count modes,
+  recoverable pagination, optional merged context windows, host-budget-aware
+  complete-match pages, and cancellable regex workers with per-file deadlines.
+- Reframed the ticker and report as estimated tool-output reduction rather than
+  net session savings, and added private window-local operation metrics.
+- Updated Copilot steering for all five tools, refreshed usage examples and the
+  walkthrough, and added regression coverage for tools, policies and packaging.
+
 ## 0.3.4 — 2026-06-18
 
 - **Copilot steering now forces the compressor tools, not just nudges.**

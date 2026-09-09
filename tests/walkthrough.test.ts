@@ -24,6 +24,19 @@ if (walkthrough === undefined) {
 const commandIds = new Set(pkg.contributes.commands.map((c) => c.command));
 
 describe('getting-started walkthrough', () => {
+  it('documents current tools and includes the usage guide in packaging', () => {
+    const tools = readFileSync(path.join(root, 'media/walkthrough/tools.md'), 'utf8');
+    for (const name of ['Read', 'Search', 'Outline', 'Execute', 'Log']) {
+      expect(tools).toContain(`#compressor${name}`);
+    }
+    expect(tools).toContain('contextLines=2');
+    expect(readFileSync(path.join(root, '.vscodeignore'), 'utf8')).toContain('!docs/USAGE.md');
+    for (const step of walkthrough.steps) {
+      const text = readFileSync(path.join(root, step.media.markdown!), 'utf8');
+      expect(text).not.toMatch(/strip comments|three tools|tools are lossless/);
+    }
+  });
+
   it('exists with steps', () => {
     expect(walkthrough?.id).toBe('compressor.gettingStarted');
     expect(walkthrough.steps.length).toBeGreaterThanOrEqual(4);

@@ -1,3 +1,6 @@
+.github/
+docs/DEVELOPMENT-TESTING.md
+docs/IMPLEMENTATION-PLAN.md
 node_modules/
 out/
 *.vsix

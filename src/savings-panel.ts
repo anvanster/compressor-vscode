@@ -6,6 +6,7 @@ import type { LedgerSource } from './ledger-source';
 import { normalizeWindow, parseSince } from './ledger-source';
 import { readTranscriptUsage, renderTranscriptSection } from './transcripts-section';
 import type { TranscriptUsage } from './transcripts-section';
+import { operationMetricsHtml } from './operation-metrics';
 
 // Savings report webview. renderSavingsHtml is self-contained on purpose
 // (inline CSS, static SVG, no JS, no requests), so the webview runs with
@@ -19,7 +20,9 @@ export function buildSavingsHtml(
   window: string,
   usage?: TranscriptUsage,
 ): string {
-  const base = renderSavingsHtml(events, dir, windowLabel(normalizeWindow(window)));
+  const base = renderSavingsHtml(events, dir, windowLabel(normalizeWindow(window)))
+    .replace('<h1>compressor savings', '<h1>Tool-output reduction')
+    .replace('</body>', `<p>Ledger totals are gross estimated tool-output reduction across agents, not net chat-session savings. Additional reads and model turns can offset reductions.</p>${operationMetricsHtml()}</body>`);
   const section = renderTranscriptSection(usage);
   return section === '' ? base : base.replace('</body>', `${section}\n</body>`);
 }

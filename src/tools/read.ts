@@ -1,14 +1,17 @@
 import * as vscode from 'vscode';
-import { readFile } from 'node:fs/promises';
+import { readWorkspaceFile, containsPath } from './workspace-file';
 import path from 'node:path';
 import {
   OMISSION_MARKER,
   appendLedger,
   cheapEstimator,
-  compress,
-  policyFor,
 } from '@astudioplus/compressor';
-import type { CompressMeta, Mode } from '@astudioplus/compressor';
+import type { Mode } from '@astudioplus/compressor';
+import { readCandidate, selectOutput, fitOutput } from './output-policy';
+import type { OutputHints } from './output-policy';
+import { documentSymbols, flattenSymbols } from './symbols';
+import type { CodeSymbol } from './symbols';
+import { measureOperation } from '../operation-metrics';
 
 // The compressor_read languageModelTools tool: a file read that runs the
 // compressor engine in-process before the content reaches the model. Honesty
@@ -17,6 +20,7 @@ import type { CompressMeta, Mode } from '@astudioplus/compressor';
 
 export interface ReadToolInput {
   path: string;
+  symbol?: string;
   /** 1-based start line for an exact uncompressed range */
   offset?: number;
   /** line count for the exact range */
@@ -24,12 +28,13 @@ export interface ReadToolInput {
 }
 
 /** Injectable seams so the handler is unit-testable without an extension host. */
-export interface ReadToolDeps {
+export interface ReadToolDeps extends OutputHints {
   /** absolute fsPaths of the open workspace folders (privacy boundary) */
   workspaceFolders: readonly string[];
   /** compressor.mode setting, already normalized */
   mode: Mode;
   readFile?: (absPath: string) => Promise<string>;
+  symbols?: (file: string) => Promise<CodeSymbol[]>;
 }
 
 export interface ReadToolOutcome {
@@ -63,7 +68,7 @@ export function resolveWorkspacePath(
     : path.normalize(path.join(folders[0] ?? '', requested));
   const inside = folders.some((folder) => {
     const rel = path.relative(folder, candidate);
-    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    return rel !== '' && containsPath(folder, candidate);
   });
   if (!inside) {
     return {
@@ -86,7 +91,7 @@ export function numberLines(lines: readonly string[], startLine: number): string
  * The hook's worthwhile floor (src/hook/core.ts in the library — compressCall
  * is not exported from the package root, so the floor is replicated here):
  * below 200 saved chars or 10% of the input, the rewrite is noise. Saved chars
- * are measured marker-exclusive, mirroring the hook.
+ * include the complete returned marker text.
  */
 export const MIN_SAVED_CHARS = 200;
 export const MIN_SAVED_RATIO = 0.1;
@@ -114,7 +119,7 @@ export async function runReadTool(
     if ('error' in resolved) {
       return { text: resolved.error, isError: true, compressed: false };
     }
-    const read = deps.readFile ?? ((p: string) => readFile(p, 'utf8'));
+    const read = deps.readFile ?? ((file: string) => readWorkspaceFile(file, deps.workspaceFolders));
     let raw: string;
     try {
       raw = await read(resolved.absPath);
@@ -129,6 +134,18 @@ export async function runReadTool(
       allLines.pop();
     }
 
+    if (deps.cancelled?.()) throw new Error('Operation cancelled');
+    if (input.symbol !== undefined) {
+      if (input.offset !== undefined || input.limit !== undefined) throw new Error('Use symbol or offset/limit, not both');
+      const symbols = flattenSymbols(await (deps.symbols ?? documentSymbols)(resolved.absPath));
+      const matches = symbols.filter((symbol) => symbol.name === input.symbol || symbol.name.endsWith(`.${input.symbol}`));
+      if (matches.length !== 1) throw new Error(matches.length ? 'Ambiguous symbol; use its qualified name or exact line range' : 'Symbol not found; use an exact line range');
+      const match = matches[0]!;
+      input = { path: input.path, offset: match.start, limit: match.end - match.start + 1 };
+    }
+    for (const value of [input.offset, input.limit]) {
+      if (value !== undefined && (!Number.isInteger(value) || value < 1)) throw new Error('offset and limit must be positive integers');
+    }
     const targeted = input.offset !== undefined || input.limit !== undefined;
     const start = Math.max(1, Math.floor(input.offset ?? 1));
     const count =
@@ -136,15 +153,13 @@ export async function runReadTool(
     const slice = targeted ? allLines.slice(start - 1, start - 1 + count) : allLines;
     const numbered = numberLines(slice, targeted ? start : 1);
 
-    const meta: CompressMeta = {
-      tool: 'read',
-      mode: deps.mode,
-      filePath: resolved.absPath,
-      targeted,
-    };
-    const result = compress(numbered, meta, policyFor(deps.mode), cheapEstimator);
+    const candidate = targeted ? numbered : readCandidate(allLines, resolved.absPath, deps.mode, false);
+    const bounded = targeted || deps.mode === 'full' ? candidate : await fitOutput(candidate, deps, 'use compressor_read with offset/limit for required original lines, or compressor_outline');
+    const content = await selectOutput(numbered, bounded || candidate, deps);
+    const transforms = content === numbered ? [] : [{ id: content === candidate ? 'numbered-dedupe' : 'host-budget' }];
+    const result = { content, stats: { estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(content), transforms } };
 
-    const saved = numbered.length - lengthSansMarkers(result.content);
+    const saved = numbered.length - result.content.length;
     const worthwhile =
       saved >= MIN_SAVED_CHARS && saved >= numbered.length * MIN_SAVED_RATIO;
     if (!worthwhile) {
@@ -186,8 +201,13 @@ export function registerReadTool(): vscode.Disposable {
         invocationMessage: `Reading ${options.input.path} (compressed)`,
       };
     },
-    async invoke(options) {
-      const outcome = await runReadTool(options.input, depsFromVscode());
+    async invoke(options, token) {
+      const outcome = await measureOperation('read', options.input.symbol !== undefined || options.input.offset !== undefined || options.input.limit !== undefined, () => runReadTool(options.input, {
+        ...depsFromVscode(),
+        tokenBudget: options.tokenizationOptions?.tokenBudget,
+        countTokens: options.tokenizationOptions ? (text) => options.tokenizationOptions!.countTokens(text, token) : undefined,
+        cancelled: () => token.isCancellationRequested,
+      }), (result) => result);
       return new vscode.LanguageModelToolResult([
         new vscode.LanguageModelTextPart(outcome.text),
       ]);

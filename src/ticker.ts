@@ -43,9 +43,9 @@ export function formatTicker(totals: SavingsTotals, window: string): TickerView 
     };
   }
   return {
-    text: `$(archive) ≈${formatTokens(totals.savedTokens)} tok saved (${window})`,
+    text: `$(archive) ≈${formatTokens(totals.savedTokens)} tok reduced (${window})`,
     tooltip:
-      'Compressor: estimated tokens saved by the compression hook (chars are exact; ' +
+      'Compressor: gross estimated tool-output reduction, not net session savings (chars are exact; ' +
       'token figures are estimates). Click for the report.\n' +
       `≈${fmt(totals.savedTokens)} tokens · ${fmt(totals.savedChars)} chars (exact) · ` +
       `${fmt(totals.events)} events · ${windowLabel(window)}`,

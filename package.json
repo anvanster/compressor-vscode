@@ -1,8 +1,8 @@
 {
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
-    "description": "Save tokens in GitHub Copilot agent mode — compressed read/search/outline tools, a savings ticker & report, and instruction-pack management. No network calls.",
-    "version": "0.3.4",
+    "description": "Reduce tool-output traffic in Copilot with source-preserving reads, search, outlines, confirmed commands and retained logs. Includes output-reduction reports and steering.",
+    "version": "0.4.0",
     "publisher": "aStudioPlus",
     "icon": "assets/icon.png",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
@@ -107,7 +107,7 @@
                         "slim"
                     ],
                     "default": "optimized",
-                    "description": "Compression mode for the compressor_read tool. 'full' disables compression (passthrough); 'optimized' strips comments and dedupes repeated lines; 'slim' additionally filters logs. Omitted content is always marked with a recoverable [compressor:] marker; token figures derived from it are estimates."
+                    "description": "Read/search policy: full disables automatic compression; optimized/slim preserve source code and comments, collapse repeated log lines and bound search results. Explicit outline and execution tools still summarize. Exact ranges stay uncompressed; optional host budgets can bound whole-file results. Figures measure gross output reduction, not session savings."
                 },
                 "compressor.showActualUsage": {
                     "type": "boolean",
@@ -118,11 +118,44 @@
         },
         "languageModelTools": [
             {
+                "name": "compressor_execute",
+                "toolReferenceName": "compressorExecute",
+                "displayName": "Run Command With Compressed Log",
+                "canBeReferencedInPrompt": true,
+                "modelDescription": "Run a noninteractive shell command in a trusted workspace after confirmation. Returns exit status, a diagnostic summary and a retained log ID. Use for tests and builds. Commands can modify files or access the network. Stops on timeout or 2 MB output limit, marking output partial. Retrieve omitted output with compressor_log.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "command": { "type": "string", "minLength": 1 },
+                        "cwd": { "type": "string", "description": "Workspace directory; defaults to first root" },
+                        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 600 }
+                    },
+                    "required": ["command"]
+                }
+            },
+            {
+                "name": "compressor_log",
+                "toolReferenceName": "compressorLog",
+                "displayName": "Retrieve Command Log",
+                "canBeReferencedInPrompt": true,
+                "modelDescription": "Retrieve exact retained command output by log ID and 1-based offset/limit. Logs remain in this extension window memory for up to 30 minutes and the last five commands. An output-limited command has only a partial retained log. Retrieve instead of rerunning commands.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "string" },
+                        "offset": { "type": "integer", "minimum": 1 },
+                        "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
+                        "characterOffset": { "type": "integer", "minimum": 0, "description": "Continue an oversized selected range at this character offset" }
+                    },
+                    "required": ["id"]
+                }
+            },
+            {
                 "name": "compressor_read",
                 "toolReferenceName": "compressorRead",
                 "displayName": "Compressed File Read",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Read a workspace file with automatic token compression. Preserves line numbers; collapses comments and repeated lines; marks any omitted span inline as [compressor: … offset=N limit=M to retrieve]. In agent mode, default to this instead of the built-in file read for EVERY file read: it is a drop-in, lossless replacement and short files are returned unchanged, so there is no downside — and it saves the most on files longer than ~200 lines and on logs or build output. Read the whole file first and let it collapse the noise. To read an exact range uncompressed, pass offset (1-based start line) and limit (line count). If a [compressor: …] marker hides a span you need, call again with the offset/limit it states — nothing is lost, only deferred.",
+                "modelDescription": "Read workspace text with original line numbers. Source code and comments are preserved; repeated log lines may be collapsed with recovery ranges. Prefer relevant offset/limit ranges or a qualified symbol name. Use compressor_outline to discover symbols. Exact ranges and symbols are uncompressed. Whole-file reads suit small files or broad edits. Canonical workspace paths and regular text files up to 8 MB only.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -131,12 +164,18 @@
                             "description": "workspace-relative or absolute file path"
                         },
                         "offset": {
-                            "type": "number",
+                            "type": "integer",
+                            "minimum": 1,
                             "description": "1-based start line for an exact uncompressed range"
                         },
                         "limit": {
-                            "type": "number",
+                            "type": "integer",
+                            "minimum": 1,
                             "description": "line count for the exact range"
+                        },
+                        "symbol": {
+                            "type": "string",
+                            "description": "Exact or qualified symbol name; do not combine with offset/limit"
                         }
                     },
                     "required": [
@@ -149,7 +188,7 @@
                 "toolReferenceName": "compressorSearch",
                 "displayName": "Compressed Workspace Search",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Search the open workspace for a string or regular expression and get grep-style results (file path + line number + matching line) with token compression: repeated lines are deduplicated and oversized result sets are truncated with a recoverable [compressor:] marker. In agent mode, default to this instead of the built-in codebase/text search, and prefer it over reading whole files, when you are looking for where something is defined or used. Inputs: query (required); isRegex (treat query as a JS regex); ignoreCase; include (a glob like 'src/**/*.ts'); maxResults. Results are confined to the open workspace folders.",
+                "modelDescription": "Search workspace text using literal or JS regex matching. Regex evaluation is cancellable with a one-second per-file deadline; simplify patterns that time out. Narrow discovery with include and root (use an absolute path for ambiguous names). Use output=files or count for compact results. Partial scans are explicitly marked; continue capped matches using skip with unchanged inputs. Generated/dependency directories and unsupported files are excluded. Content results retain file paths and line numbers.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -170,8 +209,23 @@
                             "description": "glob of files to search, relative to the workspace (e.g. src/**/*.ts)"
                         },
                         "maxResults": {
-                            "type": "number",
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1000,
                             "description": "maximum number of matches to return"
+                        },
+                        "root": { "type": "string", "description": "Open workspace folder name or absolute path" },
+                        "output": { "type": "string", "enum": ["content", "files", "count"] },
+                        "contextLines": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 5,
+                            "description": "Surrounding lines per content match (default 0). Overlapping windows merge. Arrow marks selected matches; | marks context. Counts and skip exclude context."
+                        },
+                        "skip": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Matching lines to skip for continuation"
                         }
                     },
                     "required": [
@@ -184,7 +238,7 @@
                 "toolReferenceName": "compressorOutline",
                 "displayName": "Code Outline",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Return a code file's structure — top-level imports and signatures (functions, classes, types) — with the bodies collapsed into recoverable [compressor: … offset/limit] markers and line numbers preserved. In agent mode, reach for this before the built-in read on any large source file: understand its shape cheaply, then use compressor_read with the offset/limit a marker states to expand only the body you need. Supports TypeScript/JavaScript, Rust, Python, and Go; other file types return a note telling you to use compressor_read. Input: path (workspace-relative or absolute). Confined to the open workspace folders.",
+                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -235,7 +289,7 @@
                     {
                         "id": "tools",
                         "title": "Read, search & outline",
-                        "description": "Compressor's three tools: #compressorRead, #compressorSearch (find where code is used), and #compressorOutline (a file's shape) — see the example prompts to the right.",
+                        "description": "Five tools: #compressorRead, #compressorSearch (optional context), #compressorOutline, #compressorExecute and #compressorLog. See the example prompts to the right.",
                         "media": {
                             "markdown": "media/walkthrough/tools.md"
                         }
@@ -243,7 +297,7 @@
                     {
                         "id": "savings",
                         "title": "See your savings",
-                        "description": "Open the savings report to see how much you've saved.\n[Show Savings](command:compressor.showSavings)",
+                        "description": "Inspect estimated tool-output reduction and window-local operations, not net chat savings.\n[Show Savings](command:compressor.showSavings)",
                         "media": {
                             "markdown": "media/walkthrough/savings.md"
                         },

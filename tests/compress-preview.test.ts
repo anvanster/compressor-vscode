@@ -12,12 +12,12 @@ const BIG_COMMENTED_TS = Array.from(
 ).join('\n');
 
 describe('previewCompression', () => {
-  it('compresses comment-heavy code and clears the worthwhile floor', () => {
+  it('preserves comment-heavy source code', () => {
     const preview = previewCompression(BIG_COMMENTED_TS, 'optimized', '/ws/a.ts');
-    expect(preview.worthwhile).toBe(true);
-    expect(preview.savedChars).toBeGreaterThan(200);
-    expect(preview.compressed.length).toBeLessThan(preview.numberedOriginal.length);
-    expect(preview.transforms.length).toBeGreaterThan(0);
+    expect(preview.worthwhile).toBe(false);
+    expect(preview.savedChars).toBe(0);
+    expect(preview.compressed).toBe(preview.numberedOriginal);
+    expect(preview.transforms).toEqual([]);
   });
 
   it('numbers the original with the read-tool format', () => {
@@ -38,7 +38,7 @@ describe('previewCompression', () => {
   });
 
   it('omissions in compressed output carry a recoverable marker', () => {
-    const preview = previewCompression(BIG_COMMENTED_TS, 'slim', '/ws/a.ts');
+    const preview = previewCompression(Array(200).fill('repeated long build diagnostic information').join('\n'), 'slim', '/ws/build.log');
     // slim may truncate; if it omits anything it must be marked
     if (preview.compressed.length < preview.numberedOriginal.length) {
       // comment-strip alone need not add a marker, but any truncation must;

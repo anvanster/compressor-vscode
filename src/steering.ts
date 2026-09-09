@@ -48,13 +48,13 @@ export const STEERING_PRIMARY_RELATIVE_PATH = AGENT_RELATIVE_PATH;
 
 export const AGENT_CONTENT = `---
 description: 'Explore and edit this repo with compressor''s token-saving tools — the built-in file read and codebase search are out of scope.'
-tools: ['compressorRead', 'compressorSearch', 'compressorOutline', 'edit']
+tools: ['compressorRead', 'compressorSearch', 'compressorOutline', 'compressorExecute', 'compressorLog', 'edit']
 ---
 
 # Compressor agent
 
 All file reading and searching in this workspace goes through the **compressor**
-tools, which compress output before it reaches you — saving tokens with no loss.
+tools. Source code and comments are preserved; summarized results may omit information.
 Every omission is a recoverable \`[compressor: … offset=N limit=M to retrieve]\`
 marker and original line numbers are always preserved, so you can still cite and
 edit by line.
@@ -65,11 +65,8 @@ available in this agent. Read and search like this:
 - **\`compressorOutline\`** — call this first on any source file longer than
   ~200 lines to see its shape (top-level imports + signatures, bodies collapsed)
   before reading bodies. Supports TS/JS, Python, Rust, and Go.
-- **\`compressorRead\`** — read a file. Read the *whole* file and let it collapse
-  comments and repeated lines; do **not** pre-emptively page with offset/limit
-  (a targeted range is returned uncompressed, so paging defeats the savings).
-  Only pass \`offset\` (1-based start line) and \`limit\` to expand an exact span
-  that a \`[compressor: …]\` marker points to. Short files come back unchanged.
+- **\`compressorRead\`** — read relevant \`offset\`/\`limit\` ranges or qualified
+  \`symbol\` names. Whole-file reads suit small files or broad edits.
 - **\`compressorSearch\`** — find where something is defined or used (supports a
   regex, an \`include\` glob, and a result cap) instead of reading whole files.
 
@@ -77,9 +74,10 @@ When a \`[compressor: …]\` marker hides a span you actually need, call
 \`compressorRead\` again with the exact \`offset\`/\`limit\` the marker states —
 nothing is lost, only deferred.
 
-Do not read files by other means (for example shelling out to \`cat\`, \`head\`, or
-\`grep\`): the terminal is intentionally not part of this agent so that reads
-cannot bypass compression. Editing files works normally.
+Use \`compressorExecute\` for tests, builds and diagnostics after confirmation.
+Always inspect exit status. Use \`compressorLog\` to retrieve omitted output
+instead of rerunning commands. Do not use execution to bypass file boundaries.
+Editing files works normally.
 `;
 
 export const PROMPT_CONTENT = `---
@@ -93,8 +91,8 @@ and \`compressorSearch\` — for **all** file reading and searching. The built-i
 read and codebase-search tools are out of scope.
 
 - Outline large files first, then read only the bodies you need.
-- Read whole files and let compressor collapse the noise; use \`offset\`/\`limit\`
-  only to expand a span a \`[compressor: …]\` marker points to.
+- Read relevant ranges or symbols; read whole files when necessary.
+- Run checks with \`compressorExecute\` and retrieve diagnostics with \`compressorLog\`.
 - Prefer \`compressorSearch\` over opening whole files to locate definitions/uses.
 
 Proceed with the user's request.
@@ -115,13 +113,13 @@ these markers is overwritten on update and removed on disable — edit elsewhere
 
 This repo has the compressor VS Code extension installed. Prefer the compressor
 tools over the built-in ones when reading or searching files — they compress
-output before it reaches you, with no loss (omissions carry a recoverable
+output before it reaches you (omissions carry a recoverable
 \`[compressor: … offset=N limit=M]\` marker and line numbers are preserved):
 
 - \`#compressorOutline\` — a large source file's shape before you read it.
-- \`#compressorRead\` — reading a file (read the whole file and let it collapse
-  the noise; pass offset/limit only to expand a span a marker points to).
+- \`#compressorRead\` — read a relevant range or symbol, or a whole small file.
 - \`#compressorSearch\` — finding where code is defined or used.
+- \`#compressorExecute\` / \`#compressorLog\` — run checks and retrieve diagnostics.
 
 For a session where every read is forced through these tools, pick the
 **compressor** agent from the Chat agents dropdown, or run the **/compressor**
@@ -282,9 +280,15 @@ function firstWorkspaceFolder(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+async function steeringWorkspaceFolder(): Promise<string | undefined> {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length < 2) return firstWorkspaceFolder();
+  return vscode.window.showQuickPick(folders.map((folder) => folder.uri.fsPath), { placeHolder: 'Workspace folder for compressor steering' });
+}
+
 export function registerSteeringCommands(): vscode.Disposable {
   const enable = vscode.commands.registerCommand('compressor.enableSteering', async () => {
-    const projectDir = firstWorkspaceFolder();
+    const projectDir = await steeringWorkspaceFolder();
     if (projectDir === undefined) {
       void vscode.window.showErrorMessage('Compressor: open a workspace folder first.');
       return;
@@ -303,7 +307,7 @@ export function registerSteeringCommands(): vscode.Disposable {
     }
   });
   const disable = vscode.commands.registerCommand('compressor.disableSteering', async () => {
-    const projectDir = firstWorkspaceFolder();
+    const projectDir = await steeringWorkspaceFolder();
     if (projectDir === undefined) {
       void vscode.window.showErrorMessage('Compressor: open a workspace folder first.');
       return;

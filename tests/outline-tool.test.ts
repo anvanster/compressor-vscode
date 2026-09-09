@@ -14,6 +14,7 @@ const BIG_TS = [
   'export function compute(a: number, b: number): number {',
   '  const x = a + b;',
   '  const y = x * 2;',
+  ...Array.from({ length: 30 }, (_, index) => `  consume(${index});`),
   '  return y;',
   '}',
   '',
@@ -21,6 +22,7 @@ const BIG_TS = [
   '  run(): void {',
   '    doThing();',
   '    doOther();',
+  ...Array.from({ length: 30 }, (_, index) => `    consume(${index});`),
   '  }',
   '}',
 ].join('\n');
@@ -35,6 +37,14 @@ function deps(content: string, over: Partial<ReadToolDeps> = {}): ReadToolDeps {
 }
 
 describe('runOutlineTool', () => {
+  it('does not replace a tiny function with a larger recovery marker', async () => {
+    const content = 'export function x() {\n  return 1;\n}';
+    const out = await runOutlineTool({ path: 'src/x.ts' }, deps(content));
+    expect(out.outlined).toBe(false);
+    expect(out.text).toContain('return 1;');
+    expect(out.text).not.toContain(OMISSION_MARKER);
+  });
+
   it('keeps imports and signatures, collapses bodies into recoverable markers', async () => {
     const out = await runOutlineTool({ path: 'src/service.ts' }, deps(BIG_TS));
     expect(out.outlined).toBe(true);

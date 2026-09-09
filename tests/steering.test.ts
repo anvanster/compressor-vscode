@@ -45,7 +45,7 @@ describe('agent content (the deterministic lever)', () => {
     // `search` toolsets removes the built-in file read + codebase search.
     expect(AGENT_CONTENT.startsWith('---\n')).toBe(true);
     expect(AGENT_CONTENT).toContain(
-      "tools: ['compressorRead', 'compressorSearch', 'compressorOutline', 'edit']",
+      "tools: ['compressorRead', 'compressorSearch', 'compressorOutline', 'compressorExecute', 'compressorLog', 'edit']",
     );
     // the built-in read/search toolsets must NOT be listed (they would re-grant
     // the built-in read and defeat the allowlist). 'compressorRead' /

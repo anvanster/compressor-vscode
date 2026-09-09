@@ -16,8 +16,8 @@ export interface ModeView {
 
 const MODE_BLURB: Record<Mode, string> = {
   full: 'off (passthrough)',
-  optimized: 'strip comments + dedupe repeated lines',
-  slim: 'optimized + log filtering',
+  optimized: 'preserve source + dedupe logs',
+  slim: 'preserve source + compact search',
 };
 
 /** Pure label assembly, unit-tested. */

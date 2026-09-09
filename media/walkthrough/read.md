@@ -13,4 +13,8 @@ own for large or log files.
 Need an exact slice? Ask for specific lines — the tool takes an `offset` and
 `limit` and returns that range uncompressed. If a `[compressor: …]` marker
 hides something, the agent can re-read at the offset/limit the marker states —
-nothing is lost, only deferred.
+recovery reads the current file, so intervening edits can change the contents.
+
+Source comments are preserved. For provider-backed symbols, use a unique
+qualified name such as `RegexScanner.scan` instead of offsets; do not combine
+`symbol` with `offset`/`limit`.

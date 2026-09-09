@@ -13,7 +13,7 @@ describe('formatTokens', () => {
 describe('formatTicker', () => {
   it('renders totals as an approximate token figure with the window', () => {
     const view = formatTicker({ savedTokens: 12_345, savedChars: 50_000, events: 12 }, '30d');
-    expect(view.text).toBe('$(archive) ≈12.3k tok saved (30d)');
+    expect(view.text).toBe('$(archive) ≈12.3k tok reduced (30d)');
     expect(view.tooltip).toContain('estimate'); // honesty: tokens are estimates
     expect(view.tooltip).toContain('chars are exact');
     expect(view.tooltip).toContain('last 30 days');

@@ -97,18 +97,36 @@ describe('resolveWorkspacePath', () => {
 });
 
 describe('runReadTool', () => {
-  it('compresses a big commented file, preserving line numbers and the marker', async () => {
+  it('reads the exact provider symbol range without compression', async () => {
+    const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'Service.run' }, deps({
+      readFile: async () => 'class Service {\n  run() {\n    return 42;\n  }\n}',
+      symbols: async () => [{ name: 'Service', detail: '', start: 1, end: 5, children: [{ name: 'run', detail: '', start: 2, end: 4, children: [] }] }],
+    }));
+    expect(outcome.isError).toBe(false);
+    expect(outcome.compressed).toBe(false);
+    expect(outcome.text).toBe('     2→  run() {\n     3→    return 42;\n     4→  }');
+  });
+
+  it('rejects ambiguous symbol names instead of choosing a method silently', async () => {
+    const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'run' }, deps({
+      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', start: 1, end: 5, children: [{ name: 'run', detail: '', start: 2, end: 4, children: [] }] })),
+    }));
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain('Ambiguous');
+  });
+
+  it('compresses repeated logs while preserving recovery coordinates', async () => {
     const ledgerDir = await tempDir('compressor-vscode-readtool-');
     await withLedgerDir(ledgerDir, async () => {
-      const outcome = await runReadTool({ path: 'src/big.ts' }, deps());
+      const outcome = await runReadTool({ path: 'build.log' }, deps({ readFile: async () => Array(200).fill('repeated build progress information').join('\n') }));
       expect(outcome.isError).toBe(false);
       expect(outcome.compressed).toBe(true);
       expect(outcome.text).toContain('[compressor:');
       // first kept line is the first code line; its ORIGINAL number survives
-      expect(outcome.text).toMatch(/^ {5}2→export const value0 = 0;$/m);
+      expect(outcome.text).toContain('offset=2 limit=199');
       expect(outcome.text.length).toBeLessThan(BIG_COMMENTED_TS.length);
       // honesty: comments were stripped, code stayed
-      expect(outcome.text).toContain('export const value199 = 199;');
+      expect(outcome.text).toContain('repeated build progress information');
       expect(outcome.text).not.toContain('comment line 7 —');
     });
 
@@ -118,7 +136,7 @@ describe('runReadTool', () => {
     expect(event?.agent).toBe('vscode');
     expect(event?.tool).toBe('read');
     expect(event?.mode).toBe('optimized');
-    expect(event?.transforms).toContain('comment-strip');
+    expect(event?.transforms).toContain('numbered-dedupe');
     expect(event?.charsOut).toBeLessThan(event?.charsIn ?? 0);
   });
 
