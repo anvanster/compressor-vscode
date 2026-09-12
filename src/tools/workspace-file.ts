@@ -1,6 +1,26 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+/**
+ * The single exception to the workspace boundary.
+ *
+ * When a tool result is too large to pass inline, VS Code writes it to a file
+ * under its own Copilot session storage and hands the model that path. The file
+ * is this extension's own output coming back to us, so refusing to read it
+ * protects nothing — it only pushes the model onto an uncompressed path.
+ * Observed: the read was rejected and the model fell back to `cat` through the
+ * shell, which is both larger and lossy.
+ *
+ * Deliberately narrow: the path must contain VS Code's own
+ * `GitHub.copilot-chat/chat-session-resources` segment pair, which no workspace
+ * file has. Size, regular-file and binary checks still apply.
+ */
+const SESSION_RESOURCE = /(?:^|[\\/])GitHub\.copilot-chat[\\/]chat-session-resources[\\/]/;
+
+export function isChatSessionResource(target: string): boolean {
+  return SESSION_RESOURCE.test(target);
+}
+
 export function containsPath(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
@@ -8,6 +28,7 @@ export function containsPath(root: string, target: string): boolean {
 
 export async function canonicalWorkspacePath(target: string, roots: readonly string[]): Promise<string> {
   const canonical = await realpath(target);
+  if (isChatSessionResource(canonical)) return canonical;
   const canonicalRoots = await Promise.all(roots.map((root) => realpath(root)));
   if (!canonicalRoots.some((root) => containsPath(root, canonical))) {
     throw new Error('Path resolves outside the open workspace folders');

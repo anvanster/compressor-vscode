@@ -3,9 +3,9 @@
 > Development build: five tools now include confirmed command execution and
 > retained-log retrieval. Source reads preserve comments; outlines use language
 > providers when available. This README and [usage guide](docs/USAGE.md)
-> describe version 0.4.0; the Marketplace release may not yet include it.
+> describe version 0.5.0; the Marketplace release may not yet include it.
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/aStudioPlus.compressor-vscode?label=Marketplace)](https://marketplace.visualstudio.com/items?itemName=aStudioPlus.compressor-vscode)
+[![VS Marketplace](https://vsmarketplacebadges.dev/version-short/aStudioPlus.compressor-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=aStudioPlus.compressor-vscode)
 
 Companion extension for
 [compressor](https://github.com/anvanster/compressor): compressed
@@ -55,18 +55,48 @@ does not upload workspace content itself; approved commands can access the netwo
     fenced in distinct `compressor-vscode:steering` comments so it updates and
     removes cleanly and coexists with a `compressor init` pack section in the
     same file.
+
+  Owned files carry a revision stamp. Re-running the enable command updates an
+  older install in place and reports what it replaced, or tells you it is
+  already current; **Compressor: Status** flags an out-of-date install, since
+  updating the extension deliberately leaves files already on disk alone.
+
+  Both commands ask for a scope. **All workspaces (user profile)** installs the
+  agent alone to `~/.copilot/agents/compressor.agent.md`, VS Code's documented
+  user-level agent folder, so "compressor" is offered in the agents dropdown
+  everywhere without touching any repo. It stays opt-in per chat: the `tools:`
+  allowlist binds only in sessions where you pick the agent. The `/compressor`
+  prompt and the instructions section remain workspace-only, because user
+  prompts live in VS Code profile storage with no documented path, and an
+  always-on instructions file is not something to enable for every workspace at
+  once. Custom agents share one namespace with no qualification
+  ([microsoft/vscode#311920](https://github.com/microsoft/vscode/issues/311920)),
+  so a user-scope install asks before replacing a `compressor` agent it did not
+  write, and **Compressor: Status** flags it when both scopes define one, since
+  precedence is undocumented.
 - **Ticker** (status bar): `≈12.3k tok reduced (30d)` — estimated output reduction
   in the configured window. Chars are exact; token figures are estimates from
   the cheap estimator, never billable counts or net session savings. Click it
   for the report. Operation metrics are window-local, not chat-local.
-- **Compressor: Show Savings** — the savings report (by day / agent / tool / mode) in
-  a webview, themed to the active color scheme. Static HTML, scripts disabled.
+- **Compressor: Show Savings** — the savings report (by day / agent / tool / mode /
+  project) in a webview, themed to the active color scheme. Static HTML, scripts
+  disabled. Project labels are hashed by default: the label is a keyed digest of
+  the workspace path. The key is generated on first use at
+  `~/.compressor/project-salt` (owner-only, and deliberately outside the ledger
+  directory so it never travels with a shared ledger). The key and the labelling
+  both come from the compressor library, shared with the CLI, so a folder gets
+  one label whichever tool records the event, and the key is never written to the
+  ledger, so a shared report cannot be tested against candidate project names.
+  Set `compressor.projectLabel` to `name` for clear-text folder names; the
+  absolute path is never recorded either way. Steering older than the running
+  build shows as a banner here and as a warning on the ticker, never as a
+  notification.
   Optionally (set `compressor.showActualUsage`, off by default) appends an
   **actual-usage** section parsed from this project's Claude Code session
   transcripts (`~/.claude`) — authoritative token counts, clearly labeled
   *not savings* and not billable dollars (Claude Code only).
 - **Mode indicator** (status bar): `$(fold) compressor: <mode>` — click to
-  switch the read tool's compression mode without the command palette.
+  switch the read/search output policy without the command palette.
 - **Compressor: Count Tokens** — exact chars and an estimated token count for
   the active file or selection (chars/3.5; never billable).
 - **Compressor: Preview Compression** — applies the read content policy to the
@@ -83,9 +113,13 @@ does not upload workspace content itself; approved commands can access the netwo
 
 Settings: `compressor.savingsWindow` (`7d` | `30d` | `all`, default `30d`),
 `compressor.mode` (`full` | `optimized` | `slim`, default `optimized` — the
-read tool's compression mode; `full` = passthrough), and
+read/search output policy; `slim` bounds search results about twice as tightly
+as `optimized`, `full` = passthrough), and
 `compressor.showActualUsage` (default `false` — show the Claude Code
-transcript usage section in the report).
+transcript usage section in the report), and
+`compressor.projectLabel` (`hashed` | `name`, default `hashed` — how the ledger
+records which workspace a reduction came from, so the report can break totals
+down by project).
 
 ## Try it
 
@@ -112,9 +146,9 @@ Explain the matches using the returned context. Follow any recovery guidance.
 ```
 
 ```text
-Use #compressorExecute in /home/jason/projects/compressor-vscode to run
-"npm test -- tests/search-tool.test.ts". Check the exit status and retrieve
-omitted diagnostics with #compressorLog using the returned ID, not another run.
+Use #compressorExecute to run "npm test -- tests/search-tool.test.ts" in the
+workspace root. Check the exit status and retrieve omitted diagnostics with
+#compressorLog using the returned ID, not another run.
 ```
 
 Adapt these repository-specific paths to your workspace. Search context is off
@@ -134,6 +168,12 @@ deterministic. More examples and the full command list are in
   happens only when the agent uses Compressor tools. Instruction packs reach
   Copilot via `.github/copilot-instructions.md` / `AGENTS.md` — see the
   [compressor docs](https://github.com/anvanster/compressor).
+- Reads are confined to the open workspace folders, with one exception: when a
+  tool result is too large to pass inline, VS Code writes it under its own
+  `GitHub.copilot-chat/chat-session-resources` folder and hands the model that
+  path. That file is this extension's own output coming back, so it is readable;
+  refusing it only pushed the model onto an uncompressed path. Nothing else
+  outside the workspace is.
 - Search reads files in its discovered scope. Outlines use language providers;
   the optional usage report reads local Claude Code transcripts. Approved
   commands can modify files or access resources outside the workspace.

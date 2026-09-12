@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
-import { readWorkspaceFile, containsPath } from './workspace-file';
+import { readWorkspaceFile, containsPath, isChatSessionResource } from './workspace-file';
 import path from 'node:path';
 import {
   OMISSION_MARKER,
-  appendLedger,
   cheapEstimator,
 } from '@astudioplus/compressor';
+import { recordEvent } from '../ledger';
 import type { Mode } from '@astudioplus/compressor';
 import { readCandidate, selectOutput, fitOutput } from './output-policy';
 import type { OutputHints } from './output-policy';
-import { documentSymbols, flattenSymbols } from './symbols';
+import { documentSymbols, flattenSymbols, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { measureOperation } from '../operation-metrics';
 
@@ -41,7 +41,7 @@ export interface ReadToolOutcome {
   text: string;
   /** true when the text is an error message, not file content */
   isError: boolean;
-  /** true when the compressed form was returned (and a ledger event fired) */
+  /** true when a reduced form was returned instead of the full numbered text */
   compressed: boolean;
 }
 
@@ -66,6 +66,8 @@ export function resolveWorkspacePath(
   const candidate = path.isAbsolute(requested)
     ? path.normalize(requested)
     : path.normalize(path.join(folders[0] ?? '', requested));
+  // a spilled tool result: our own output, handed back by VS Code
+  if (isChatSessionResource(candidate)) return { absPath: candidate };
   const inside = folders.some((folder) => {
     const rel = path.relative(folder, candidate);
     return rel !== '' && containsPath(folder, candidate);
@@ -74,7 +76,8 @@ export function resolveWorkspacePath(
     return {
       error:
         `compressor_read: ${requested} is outside the open workspace folder(s) — ` +
-        'this tool only reads files inside the workspace',
+        'this tool reads files inside the workspace, plus tool results VS Code has ' +
+        'spilled to its own chat-session-resources folder',
     };
   }
   return { absPath: candidate };
@@ -106,15 +109,124 @@ export function lengthSansMarkers(text: string): number {
     .join('\n').length;
 }
 
+/**
+ * When the whole file will not fit, degrade by LEVEL OF DETAIL rather than by
+ * cutting the content in half.
+ *
+ * A truncated prefix loses both ways: a weaker model describes the part it
+ * never received, and a stronger one notices the gap and re-reads the file by
+ * other means, spending more than if nothing had been compressed. A complete
+ * list of declarations has neither failure. Nothing is missing from it at its
+ * own level, so there is no symbol to invent and no reason to re-read — the
+ * next step is one named range. Measured 84-93% smaller than the source.
+ */
+export async function completeStructure(
+  absPath: string,
+  requested: string,
+  deps: ReadToolDeps,
+): Promise<string | undefined> {
+  let symbols: CodeSymbol[];
+  try {
+    symbols = await (deps.symbols ?? documentSymbols)(absPath);
+  } catch {
+    return undefined;
+  }
+  if (symbols.length === 0) return undefined;
+  return `[compressor: ${requested} does not fit the budget. COMPLETE list of its ` +
+    'declarations follows: every symbol in the file is here, nothing omitted. Bodies are ' +
+    `not included — read one with compressor_read ${requested} offset=N limit=M.]\n` +
+    formatSymbols(symbols);
+}
+
+/**
+ * A range that stops short of the end of the file looks exactly like the whole
+ * file: nothing in the output says otherwise, so a model that reads the first
+ * N lines goes on to describe declarations it never saw. State what was shown
+ * out of what exists, and where to continue.
+ */
+export function rangeNote(start: number, shown: number, total: number): string {
+  if (shown <= 0) return '';
+  const end = start + shown - 1;
+  if (start <= 1 && end >= total) return ''; // the whole file was returned
+  const next = end + 1;
+  // Only a range that starts at the top is a sample of the file, where reading
+  // on is the natural next step. A mid-file or symbol range was asked for
+  // deliberately, and "continue with" there just invites a read nobody needed.
+  const shouldContinue = start <= 1 && next <= total;
+  return `[compressor: showing lines ${start}-${Math.min(end, total)} of ${total}` +
+    (shouldContinue ? `; continue with offset=${next}]` : ']');
+}
+
+/**
+ * A budget-trimmed read that does not say where it stopped is unrecoverable:
+ * the model cannot tell which lines it is missing, so it re-reads the file by
+ * other means and the saving is spent again immediately. Line numbers are
+ * preserved, so the resume point is known — name it, the way search names
+ * `skip=`. The rewrite is kept no longer than the marker it replaces, so the
+ * output still fits the budget it was just trimmed to.
+ */
+export function withResumePoint(trimmed: string): string {
+  const lines = trimmed.split('\n');
+  const marker = lines.findIndex((line) => line.startsWith('[compressor: partial output;'));
+  if (marker < 0) return trimmed;
+  for (let index = marker - 1; index >= 0; index -= 1) {
+    const numbered = /^\s*(\d+)→/.exec(lines[index] ?? '');
+    if (numbered === null) continue;
+    const replacement =
+      `[compressor: partial output; continue with offset=${Number(numbered[1]) + 1}, ` +
+      'or compressor_outline for the shape of the rest]';
+    if (replacement.length > (lines[marker] ?? '').length) return trimmed;
+    lines[marker] = replacement;
+    return lines.join('\n');
+  }
+  return trimmed;
+}
+
+/**
+ * A failed read is a dead end unless the model can see what to try instead, and
+ * raw ENOENT text (which also echoes the resolved absolute path) tells it
+ * nothing useful. The common miss is prefixing the workspace folder's own name,
+ * so when dropping the first segment resolves to a real file, name it.
+ */
+export async function readFailure(
+  requested: string,
+  reason: string,
+  folders: readonly string[],
+  read: (absPath: string) => Promise<string>,
+): Promise<string> {
+  if (!reason.includes('ENOENT')) {
+    return `compressor_read: cannot read ${requested}: ${reason}`;
+  }
+  const segments = requested.split('/').filter((segment) => segment !== '');
+  if (segments.length > 1) {
+    const without = segments.slice(1).join('/');
+    const alternative = resolveWorkspacePath(without, folders);
+    if (!('error' in alternative)) {
+      try {
+        await read(alternative.absPath);
+        return `compressor_read: ${requested} not found — did you mean ${without}? ` +
+          'Paths are relative to the workspace folder, so the folder\'s own name is not part of them.';
+      } catch {
+        // no better suggestion to offer; fall through to the plain message
+      }
+    }
+  }
+  return `compressor_read: ${requested} not found in the workspace ` +
+    '(paths are workspace-relative, or absolute inside a workspace folder)';
+}
+
 /** Pure-ish handler (fs injected); the vscode layer only adapts types. */
 export async function runReadTool(
   input: ReadToolInput,
   deps: ReadToolDeps,
 ): Promise<ReadToolOutcome> {
   try {
-    if (typeof input.path !== 'string' || input.path === '') {
+    if (typeof input.path !== 'string' || input.path.trim() === '') {
       return { text: 'compressor_read: a file path is required', isError: true, compressed: false };
     }
+    // models occasionally emit a stray leading/trailing space; failing the read
+    // over whitespace costs a whole turn to recover from
+    input = { ...input, path: input.path.trim() };
     const resolved = resolveWorkspacePath(input.path, deps.workspaceFolders);
     if ('error' in resolved) {
       return { text: resolved.error, isError: true, compressed: false };
@@ -125,7 +237,11 @@ export async function runReadTool(
       raw = await read(resolved.absPath);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return { text: `compressor_read: cannot read ${input.path}: ${reason}`, isError: true, compressed: false };
+      return {
+        text: await readFailure(input.path, reason, deps.workspaceFolders, read),
+        isError: true,
+        compressed: false,
+      };
     }
 
     const allLines = raw.split('\n');
@@ -153,33 +269,65 @@ export async function runReadTool(
     const slice = targeted ? allLines.slice(start - 1, start - 1 + count) : allLines;
     const numbered = numberLines(slice, targeted ? start : 1);
 
+    // Two independent decisions, in this order. Content reduction is optional:
+    // it must never grow the output and is discarded below the worthwhile
+    // floor. A host budget is a hard cap applied last: whatever fits is
+    // returned even when the saving is small, and a budget too small for a
+    // recovery marker yields a short notice rather than the whole file.
     const candidate = targeted ? numbered : readCandidate(allLines, resolved.absPath, deps.mode, false);
-    const bounded = targeted || deps.mode === 'full' ? candidate : await fitOutput(candidate, deps, 'use compressor_read with offset/limit for required original lines, or compressor_outline');
-    const content = await selectOutput(numbered, bounded || candidate, deps);
-    const transforms = content === numbered ? [] : [{ id: content === candidate ? 'numbered-dedupe' : 'host-budget' }];
-    const result = { content, stats: { estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(content), transforms } };
+    const reduced = await selectOutput(numbered, candidate, deps);
+    let capped = targeted || deps.mode === 'full'
+      ? reduced
+      : await fitOutput(reduced, deps, 'use compressor_read with offset/limit for the lines you still need, or compressor_outline');
+    let budgeted = capped !== reduced;
+    if (budgeted) {
+      // prefer a complete structure over a truncated prefix; only when no
+      // symbol provider can describe the file do we fall back to cutting it
+      const structure = await completeStructure(resolved.absPath, input.path, deps);
+      const fitted = structure === undefined
+        ? undefined
+        : await fitOutput(structure, deps, `read compressor_outline ${input.path} instead`);
+      if (fitted !== undefined && fitted !== '' && fitted === structure) {
+        capped = structure;
+        budgeted = true;
+      } else if (capped !== '') {
+        capped = withResumePoint(capped);
+      }
+    }
+    const notice =
+      `[compressor: ${input.path} omitted; the budget cannot fit a recovery marker. ` +
+      'Read a range with offset/limit, or use compressor_outline]';
+    // A notice longer than the file it replaces helps nobody.
+    const content = !budgeted ? reduced
+      : capped || (notice.length < numbered.length ? notice : numbered);
 
-    const saved = numbered.length - result.content.length;
+    const saved = numbered.length - content.length;
     const worthwhile =
       saved >= MIN_SAVED_CHARS && saved >= numbered.length * MIN_SAVED_RATIO;
-    if (!worthwhile) {
-      return { text: numbered, isError: false, compressed: false };
+    if (content === numbered || (!budgeted && !worthwhile)) {
+      // Leads the output: a model that stops reading partway through a result
+      // still sees how much of the file it was given. Metadata about coverage,
+      // never counted as a reduction.
+      const note = targeted ? rangeNote(start, slice.length, allLines.length) : '';
+      return { text: note === '' ? numbered : `${note}\n${numbered}`, isError: false, compressed: false };
     }
 
-    // fire-and-forget, fail-open: the ledger must never break the tool call
-    void appendLedger({
-      ts: new Date().toISOString(),
-      agent: 'vscode',
-      tool: 'read',
-      mode: deps.mode,
-      charsIn: numbered.length,
-      charsOut: result.content.length,
-      estTokensIn: result.stats.estTokensIn,
-      estTokensOut: result.stats.estTokensOut,
-      transforms: result.stats.transforms.map((t) => t.id),
-    }).catch(() => {});
+    if (worthwhile) {
+      // fire-and-forget, fail-open: the ledger must never break the tool call
+      void recordEvent({
+        ts: new Date().toISOString(),
+        agent: 'vscode',
+        tool: 'read',
+        mode: deps.mode,
+        charsIn: numbered.length,
+        charsOut: content.length,
+        estTokensIn: cheapEstimator(numbered),
+        estTokensOut: cheapEstimator(content),
+        transforms: [budgeted ? 'host-budget' : 'numbered-dedupe'],
+      }).catch(() => {});
+    }
 
-    return { text: result.content, isError: false, compressed: true };
+    return { text: content, isError: false, compressed: true };
   } catch (error) {
     // never throw raw out of a tool invocation
     const reason = error instanceof Error ? error.message : String(error);

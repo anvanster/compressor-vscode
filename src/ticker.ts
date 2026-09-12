@@ -31,24 +31,38 @@ export interface TickerView {
   tooltip: string;
 }
 
-/** Pure label assembly, separated from the StatusBarItem wiring for tests. */
-export function formatTicker(totals: SavingsTotals, window: string): TickerView {
+const STALE_TOOLTIP =
+  '\n\n⚠ Copilot steering is older than this build writes. Run "Compressor: Enable ' +
+  'Copilot Steering" to update it; "Compressor: Status" shows which scope is behind.';
+
+/**
+ * Pure label assembly, separated from the StatusBarItem wiring for tests.
+ * `stale` marks steering that this build would rewrite: it is surfaced here and
+ * in the report rather than as a notification, so it never interrupts.
+ */
+export function formatTicker(
+  totals: SavingsTotals,
+  window: string,
+  stale = false,
+): TickerView {
+  const warn = stale ? ' $(warning)' : '';
+  const staleNote = stale ? STALE_TOOLTIP : '';
   if (totals.events === 0) {
     return {
-      text: '$(archive) compressor: no savings yet',
+      text: `$(archive) compressor: no savings yet${warn}`,
       tooltip:
         'Compressor: no compression events recorded yet. The hook records an event ' +
         'every time it shrinks tool output during a real agent session — install it ' +
-        'with `compressor init`, use your agent normally, then check back.',
+        'with `compressor init`, use your agent normally, then check back.' + staleNote,
     };
   }
   return {
-    text: `$(archive) ≈${formatTokens(totals.savedTokens)} tok reduced (${window})`,
+    text: `$(archive) ≈${formatTokens(totals.savedTokens)} tok reduced (${window})${warn}`,
     tooltip:
       'Compressor: gross estimated tool-output reduction, not net session savings (chars are exact; ' +
       'token figures are estimates). Click for the report.\n' +
       `≈${fmt(totals.savedTokens)} tokens · ${fmt(totals.savedChars)} chars (exact) · ` +
-      `${fmt(totals.events)} events · ${windowLabel(window)}`,
+      `${fmt(totals.events)} events · ${windowLabel(window)}` + staleNote,
   };
 }
 
@@ -71,7 +85,11 @@ export class SavingsTicker implements vscode.Disposable {
   private debounce: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
-  constructor(private readonly source: LedgerSource) {
+  constructor(
+    private readonly source: LedgerSource,
+    /** true when steering on disk is older than this build writes */
+    private readonly steeringStale: () => Promise<boolean> = async () => false,
+  ) {
     this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     this.item.command = 'compressor.showSavings';
   }
@@ -135,9 +153,21 @@ export class SavingsTicker implements vscode.Disposable {
       if (this.disposed) {
         return;
       }
-      const view = formatTicker(savingsTotals(events), window);
+      let stale = false;
+      try {
+        stale = await this.steeringStale();
+      } catch {
+        stale = false; // a steering probe must never blank the ticker
+      }
+      if (this.disposed) {
+        return;
+      }
+      const view = formatTicker(savingsTotals(events), window, stale);
       this.item.text = view.text;
       this.item.tooltip = view.tooltip;
+      this.item.backgroundColor = stale
+        ? new vscode.ThemeColor('statusBarItem.warningBackground')
+        : undefined;
     } catch {
       // a broken ledger must never break the editor; keep the last view
     }

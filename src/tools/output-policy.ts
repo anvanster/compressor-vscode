@@ -6,10 +6,12 @@ export interface OutputHints {
   cancelled?: () => boolean;
 }
 
-export async function fitOutput(text: string, hints: OutputHints, recovery: string): Promise<string> {
-  const budget = hints.tokenBudget;
-  if (budget === undefined || !Number.isFinite(budget) || budget <= 0) return text;
-  const count = async (value: string): Promise<number> => {
+/**
+ * Host token counting with cancellation, falling back to the cheap estimator
+ * when the host supplies no counter or its counter throws.
+ */
+export function tokenCounter(hints: OutputHints): (value: string) => Promise<number> {
+  return async (value) => {
     if (hints.cancelled?.()) throw new Error('Operation cancelled');
     try { return await (hints.countTokens?.(value) ?? cheapEstimator(value)); }
     catch (error) {
@@ -17,6 +19,12 @@ export async function fitOutput(text: string, hints: OutputHints, recovery: stri
       return cheapEstimator(value);
     }
   };
+}
+
+export async function fitOutput(text: string, hints: OutputHints, recovery: string): Promise<string> {
+  const budget = hints.tokenBudget;
+  if (budget === undefined || !Number.isFinite(budget) || budget <= 0) return text;
+  const count = tokenCounter(hints);
   if (await count(text) <= budget) return text;
   const marker = `\n[compressor: partial output; ${recovery}]`;
   if (await count(marker) > budget) return '';
@@ -50,7 +58,26 @@ export function numberedText(lines: readonly string[], offset = 1): string {
   return lines.map((text, index) => `${String(offset + index).padStart(6)}→${text}`).join('\n');
 }
 
+/**
+ * JSON cannot contain a literal newline inside a string, so the start of every
+ * line is always outside a string: dropping leading whitespace leaves every
+ * value byte-exact and keeps line numbers. Measured 31% on package.json and 26%
+ * on package-lock.json, with nothing omitted.
+ *
+ * Deliberately NOT applied to TS/JS/Go/Rust, where template and raw strings span
+ * lines so leading whitespace can be data, nor to Python/YAML/Markdown, where
+ * indentation is syntax. Those only yield 6-7% anyway, so the risk buys nothing.
+ */
+const DEDENTABLE = /\.(json|jsonc)$/i;
+
+export function losslessLines(lines: readonly string[], file: string): readonly string[] {
+  return DEDENTABLE.test(file) ? lines.map((line) => line.replace(/^[ \t]+/, '')) : lines;
+}
+
 export function readCandidate(lines: readonly string[], file: string, mode: string, targeted: boolean): string {
+  if (mode !== 'full' && DEDENTABLE.test(file)) {
+    return numberedText(losslessLines(lines, file));
+  }
   const original = numberedText(lines);
   if (mode === 'full' || targeted || langFromPath(file) !== undefined || /\.(json|jsonc|md|mdx|xml|html)$/i.test(file)) return original;
   const output: string[] = [];

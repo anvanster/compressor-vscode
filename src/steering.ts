@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import os from 'node:os';
 import { mkdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -46,15 +47,72 @@ export const COPILOT_INSTRUCTIONS_RELATIVE_PATH = path.join('.github', 'copilot-
 /** The artifact whose presence `status` and `steeringInstalled` key on. */
 export const STEERING_PRIMARY_RELATIVE_PATH = AGENT_RELATIVE_PATH;
 
-export const AGENT_CONTENT = `---
-description: 'Explore and edit this repo with compressor''s token-saving tools — the built-in file read and codebase search are out of scope.'
-tools: ['compressorRead', 'compressorSearch', 'compressorOutline', 'compressorExecute', 'compressorLog', 'edit']
+/** Workspace steering is per-repo; user steering installs into the home dir. */
+export type SteeringScope = 'workspace' | 'user';
+
+/**
+ * Copilot's user-profile agent folder (doc: "User profile ~/.copilot/agents").
+ * Unlike the workspace folder this is a namespace shared with every agent the
+ * user has ever installed, so installs there check ownership first.
+ */
+export function userAgentDir(home: string = os.homedir()): string {
+  return path.join(home, '.copilot', 'agents');
+}
+
+export function userAgentPath(home: string = os.homedir()): string {
+  return path.join(userAgentDir(home), 'compressor.agent.md');
+}
+
+/**
+ * Bump whenever the agent/prompt/instructions text changes in a way an existing
+ * install should pick up. Stamped into owned files so an install can say what
+ * it replaced, and so `status` can name the revision on disk.
+ */
+export const STEERING_REVISION = 3;
+
+const OWNED_MARKER_PREFIX = '<!-- compressor-vscode:owned';
+const OWNED_MARKER_RE = /<!-- compressor-vscode:owned v=(\d+) -->/;
+
+/**
+ * Stamped into files this extension owns. VS Code gives custom agents no
+ * namespace (microsoft/vscode#311920): the agent's `name` is its whole
+ * identity, so a user-scope install must never clobber a `compressor` agent
+ * somebody else wrote.
+ */
+export const OWNED_MARKER = `${OWNED_MARKER_PREFIX} v=${STEERING_REVISION} -->`;
+
+/** Prefix match, so a file stamped by an older revision is still ours. */
+export function isOwned(text: string): boolean {
+  return text.includes(OWNED_MARKER_PREFIX);
+}
+
+/** The revision stamped in an owned file; undefined before stamps existed. */
+export function ownedRevision(text: string): number | undefined {
+  const stamped = OWNED_MARKER_RE.exec(text)?.[1];
+  return stamped === undefined ? undefined : Number(stamped);
+}
+
+// The tools allowlist is the load-bearing part of the agent (it is what keeps
+// the built-in read out of scope), so both scopes build from one definition
+// rather than two constants that can drift apart.
+const AGENT_TOOLS =
+  "['compressorRead', 'compressorSearch', 'compressorOutline', 'compressorExecute', 'compressorLog', 'edit']";
+
+function buildAgentContent(scope: SteeringScope): string {
+  const subject = scope === 'user' ? 'any workspace' : 'this repo';
+  const opening = scope === 'user'
+    ? 'All file reading and searching goes through the **compressor** tools in\nwhichever workspace you select this agent.'
+    : 'All file reading and searching in this workspace goes through the **compressor**\ntools.';
+  return `---
+name: compressor
+description: 'Explore and edit ${subject} with compressor''s token-saving tools — the built-in file read and codebase search are out of scope.'
+tools: ${AGENT_TOOLS}
 ---
+${OWNED_MARKER}
 
 # Compressor agent
 
-All file reading and searching in this workspace goes through the **compressor**
-tools. Source code and comments are preserved; summarized results may omit information.
+${opening} Source code and comments are preserved; summarized results may omit information.
 Every omission is a recoverable \`[compressor: … offset=N limit=M to retrieve]\`
 marker and original line numbers are always preserved, so you can still cite and
 edit by line.
@@ -77,8 +135,36 @@ nothing is lost, only deferred.
 Use \`compressorExecute\` for tests, builds and diagnostics after confirmation.
 Always inspect exit status. Use \`compressorLog\` to retrieve omitted output
 instead of rerunning commands. Do not use execution to bypass file boundaries.
-Editing files works normally.
+Never use it to print a file (\`cat\`, \`head\`, \`sed -n\`): command output is
+summarized for diagnostics, so a file read that way comes back sampled rather
+than whole. \`compressorRead\` returns the range you asked for and states its
+coverage. Editing files works normally.
+
+## State only what the tools actually returned
+
+Every compressor result says how much of the file it covers. Read that line and
+obey it literally.
+
+- \`showing lines A-B of N\` means you received lines A to B and nothing else.
+  To describe anything outside that range, fetch it first with the \`offset\`
+  the marker gives you. Never describe a default value, a signature, or a
+  behaviour that was outside the lines you received.
+- \`COMPLETE list of its declarations\` means the list is exhaustive. Trust it:
+  do not re-read the file hunting for symbols that are not on it. Bodies are
+  excluded, so read a named range before you say what any of them does.
+- \`signatures only, bodies omitted\` is a shape, not an implementation. Names
+  are not evidence of behaviour.
+- A \`[compressor: ...]\` marker always names the exact call that retrieves what
+  it left out. Make that call. Do not substitute a different tool.
+
+If you did not read something, say you did not read it. An invented constant,
+default, or return type is far more expensive than the tokens the tool saved,
+because it is wrong in a way the user cannot see.
 `;
+}
+
+export const AGENT_CONTENT = buildAgentContent('workspace');
+export const USER_AGENT_CONTENT = buildAgentContent('user');
 
 export const PROMPT_CONTENT = `---
 description: 'Explore or work in this repo using compressor''s token-saving tools (no built-in file read/search).'
@@ -94,6 +180,10 @@ read and codebase-search tools are out of scope.
 - Read relevant ranges or symbols; read whole files when necessary.
 - Run checks with \`compressorExecute\` and retrieve diagnostics with \`compressorLog\`.
 - Prefer \`compressorSearch\` over opening whole files to locate definitions/uses.
+- Compressor output states its own coverage (\`showing lines A-B of N\`,
+  \`COMPLETE list\`, \`signatures only\`). Describe only what you actually
+  received; fetch the rest with the offset the marker gives, or say you did not
+  check it. Do not infer a value or a behaviour from a name.
 
 Proceed with the user's request.
 `;
@@ -120,6 +210,11 @@ output before it reaches you (omissions carry a recoverable
 - \`#compressorRead\` — read a relevant range or symbol, or a whole small file.
 - \`#compressorSearch\` — finding where code is defined or used.
 - \`#compressorExecute\` / \`#compressorLog\` — run checks and retrieve diagnostics.
+
+Compressor results state their own coverage (\`showing lines A-B of N\`,
+\`COMPLETE list of its declarations\`, \`signatures only\`). Describe only what
+you actually received, fetch the rest using the offset the marker names, and do
+not infer values or behaviour from symbol names.
 
 For a session where every read is forced through these tools, pick the
 **compressor** agent from the Chat agents dropdown, or run the **/compressor**
@@ -214,15 +309,21 @@ export function removeSteeringSection(existing: string): string {
   return [...before, ...after].join('\n');
 }
 
-/** Install all steering artifacts. Returns the paths written/edited. */
-export async function installSteering(projectDir: string): Promise<string[]> {
+/** Write whole-file artifacts under a root, creating parent dirs. */
+async function writeOwned(root: string, artifacts: readonly OwnedArtifact[]): Promise<string[]> {
   const touched: string[] = [];
-  for (const artifact of OWNED_ARTIFACTS) {
-    const file = path.join(projectDir, artifact.relativePath);
+  for (const artifact of artifacts) {
+    const file = path.join(root, artifact.relativePath);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, artifact.content, 'utf8');
     touched.push(file);
   }
+  return touched;
+}
+
+/** Install all steering artifacts. Returns the paths written/edited. */
+export async function installSteering(projectDir: string): Promise<string[]> {
+  const touched = await writeOwned(projectDir, OWNED_ARTIFACTS);
   const shared = copilotInstructionsPath(projectDir);
   await mkdir(path.dirname(shared), { recursive: true });
   await writeFile(shared, upsertSteeringSection(await readFileOrNull(shared)), 'utf8');
@@ -266,14 +367,88 @@ export async function removeSteering(projectDir: string): Promise<string[]> {
   return touched;
 }
 
+/**
+ * Whether an install would change anything on disk. "outdated" covers content
+ * this extension wrote under an older revision, a hand-edited owned file, and a
+ * missing instructions section alike: install rewrites all of them the same way,
+ * so the useful question is simply whether the bytes already match.
+ */
+export type SteeringState = 'absent' | 'current' | 'outdated';
+
+export interface SteeringStatus {
+  state: SteeringState;
+  /** revision stamped in the installed agent; absent on pre-stamp installs */
+  revision?: number;
+}
+
+function statusFor(agent: string | null, expected: string, rest: () => boolean): SteeringStatus {
+  if (agent === null) return { state: 'absent' };
+  const revision = ownedRevision(agent);
+  const state: SteeringState = agent === expected && rest() ? 'current' : 'outdated';
+  return revision === undefined ? { state } : { state, revision };
+}
+
+export async function steeringStatus(projectDir: string): Promise<SteeringStatus> {
+  const [agent, prompt, shared] = await Promise.all([
+    readFileOrNull(agentPath(projectDir)),
+    readFileOrNull(promptPath(projectDir)),
+    readFileOrNull(copilotInstructionsPath(projectDir)),
+  ]);
+  // the shared file is current when upserting our section would be a no-op
+  return statusFor(agent, AGENT_CONTENT, () =>
+    prompt === PROMPT_CONTENT && shared !== null && upsertSteeringSection(shared) === shared);
+}
+
+export async function userSteeringStatus(home: string = os.homedir()): Promise<SteeringStatus> {
+  return statusFor(await readFileOrNull(userAgentPath(home)), USER_AGENT_CONTENT, () => true);
+}
+
 /** Installed ⇨ the primary artifact (the custom agent) is present. */
 export async function steeringInstalled(projectDir: string): Promise<boolean> {
+  return (await steeringStatus(projectDir)).state !== 'absent';
+}
+
+/**
+ * User scope installs the agent only. The /compressor prompt has no documented
+ * home-directory location (user prompts live in VS Code profile user data), and
+ * the instructions section is always-on, which is not something to switch on
+ * for every workspace behind a single click.
+ */
+export async function installUserSteering(home: string = os.homedir()): Promise<string[]> {
+  return writeOwned(userAgentDir(home), [{ relativePath: 'compressor.agent.md', content: USER_AGENT_CONTENT }]);
+}
+
+export async function removeUserSteering(home: string = os.homedir()): Promise<string[]> {
+  const file = userAgentPath(home);
+  await rm(file, { force: true });
   try {
-    await readFile(agentPath(projectDir), 'utf8');
-    return true;
+    await rmdir(userAgentDir(home)); // only succeeds when empty
   } catch {
-    return false;
+    // other agents live there — leave the folder alone
   }
+  return [file];
+}
+
+export async function userSteeringInstalled(home: string = os.homedir()): Promise<boolean> {
+  return (await userSteeringStatus(home)).state !== 'absent';
+}
+
+/** How an install should describe what it just did. */
+export function installOutcome(before: SteeringStatus, scope: SteeringScope): string {
+  const what = scope === 'user' ? 'user-profile agent' : 'steering';
+  if (before.state === 'absent') return `${what} installed`;
+  const from = before.revision === undefined ? 'an older build' : `v${before.revision}`;
+  return `${what} updated from ${from} to v${STEERING_REVISION}`;
+}
+
+/**
+ * True when a `compressor` agent already sits in the shared user namespace but
+ * this extension did not write it. Installing over it would silently replace
+ * somebody else's agent, so the command asks first.
+ */
+export async function userAgentIsForeign(home: string = os.homedir()): Promise<boolean> {
+  const existing = await readFileOrNull(userAgentPath(home));
+  return existing !== null && !isOwned(existing);
 }
 
 function firstWorkspaceFolder(): string | undefined {
@@ -286,17 +461,72 @@ async function steeringWorkspaceFolder(): Promise<string | undefined> {
   return vscode.window.showQuickPick(folders.map((folder) => folder.uri.fsPath), { placeHolder: 'Workspace folder for compressor steering' });
 }
 
+/**
+ * Workspace or user profile. With no folder open only user scope is possible,
+ * so the picker is skipped rather than shown with one usable answer.
+ */
+async function pickScope(verb: string): Promise<SteeringScope | undefined> {
+  if ((vscode.workspace.workspaceFolders ?? []).length === 0) return 'user';
+  const workspace = {
+    label: 'This workspace',
+    detail: 'compressor agent, /compressor prompt, and a marked section in copilot-instructions.md',
+  };
+  const user = {
+    label: 'All workspaces (user profile)',
+    detail: `the compressor agent only, in ${userAgentDir()}`,
+  };
+  const picked = await vscode.window.showQuickPick([workspace, user], {
+    placeHolder: `Where should compressor steering be ${verb}?`,
+  });
+  if (picked === undefined) return undefined;
+  return picked.label === user.label ? 'user' : 'workspace';
+}
+
 export function registerSteeringCommands(): vscode.Disposable {
   const enable = vscode.commands.registerCommand('compressor.enableSteering', async () => {
-    const projectDir = await steeringWorkspaceFolder();
-    if (projectDir === undefined) {
-      void vscode.window.showErrorMessage('Compressor: open a workspace folder first.');
-      return;
-    }
+    const scope = await pickScope('installed');
+    if (scope === undefined) return;
     try {
+      if (scope === 'user') {
+        const before = await userSteeringStatus();
+        if (before.state === 'current') {
+          void vscode.window.showInformationMessage(
+            `Compressor: user-profile agent is already up to date (v${STEERING_REVISION}).`,
+          );
+          return;
+        }
+        if (await userAgentIsForeign()) {
+          const choice = await vscode.window.showWarningMessage(
+            `Compressor: ${userAgentPath()} already exists and was not written by this extension. ` +
+              'Custom agents share one namespace, so installing replaces it.',
+            { modal: true },
+            'Replace it',
+          );
+          if (choice !== 'Replace it') return;
+        }
+        await installUserSteering();
+        void vscode.window.showInformationMessage(
+          `Compressor: ${installOutcome(before, 'user')} at ${userAgentPath()}. Pick "compressor" from ` +
+            'the Chat agents dropdown in any workspace. If it does not appear, VS Code has an open ' +
+            'issue discovering user-level agents; workspace steering is unaffected.',
+        );
+        return;
+      }
+      const projectDir = await steeringWorkspaceFolder();
+      if (projectDir === undefined) {
+        void vscode.window.showErrorMessage('Compressor: open a workspace folder first.');
+        return;
+      }
+      const before = await steeringStatus(projectDir);
+      if (before.state === 'current') {
+        void vscode.window.showInformationMessage(
+          `Compressor: steering is already up to date (v${STEERING_REVISION}).`,
+        );
+        return;
+      }
       await installSteering(projectDir);
       void vscode.window.showInformationMessage(
-        'Compressor: steering installed — pick the "compressor" agent from the Chat ' +
+        `Compressor: ${installOutcome(before, 'workspace')} — pick the "compressor" agent from the Chat ` +
           'agents dropdown (or run the /compressor prompt) to force the compressor ' +
           'read/search tools; a marked section in .github/copilot-instructions.md also ' +
           'nudges the default agent. Applies to new chats.',
@@ -307,12 +537,21 @@ export function registerSteeringCommands(): vscode.Disposable {
     }
   });
   const disable = vscode.commands.registerCommand('compressor.disableSteering', async () => {
-    const projectDir = await steeringWorkspaceFolder();
-    if (projectDir === undefined) {
-      void vscode.window.showErrorMessage('Compressor: open a workspace folder first.');
-      return;
-    }
+    const scope = await pickScope('removed');
+    if (scope === undefined) return;
     try {
+      if (scope === 'user') {
+        await removeUserSteering();
+        void vscode.window.showInformationMessage(
+          'Compressor: user-profile compressor agent removed. Workspace steering is unchanged.',
+        );
+        return;
+      }
+      const projectDir = await steeringWorkspaceFolder();
+      if (projectDir === undefined) {
+        void vscode.window.showErrorMessage('Compressor: open a workspace folder first.');
+        return;
+      }
       await removeSteering(projectDir);
       void vscode.window.showInformationMessage(
         'Compressor: steering removed (agent, /compressor prompt, and the marked ' +

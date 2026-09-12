@@ -1,26 +1,21 @@
 import * as vscode from 'vscode';
 import { readWorkspaceFile } from './workspace-file';
 import path from 'node:path';
-import {
-  appendLedger,
-  cheapEstimator,
-  compress,
-  policyFor,
-} from '@astudioplus/compressor';
-import type { CompressMeta, Mode } from '@astudioplus/compressor';
-import { MIN_SAVED_CHARS, MIN_SAVED_RATIO, normalizeMode } from './read';
+import { cheapEstimator } from '@astudioplus/compressor';
+import { recordEvent } from '../ledger';
+import type { Mode } from '@astudioplus/compressor';
+import { normalizeMode } from './read';
 import { containsPath } from './workspace-file';
-import { selectOutput, fitOutput } from './output-policy';
+import { fitOutput, tokenCounter } from './output-policy';
 import type { OutputHints } from './output-policy';
 import { measureOperation } from '../operation-metrics';
 import { RegexScanner } from './regex-scanner';
 
 // The compressor_search languageModelTools tool: a workspace text/regex search
-// whose grep-style results run through the compressor engine (dedupe repeated
-// lines, truncate over budget with a recoverable [compressor:] marker) before
-// reaching the model. Search output is exactly the kind of bulk text that
-// inflates context. Honesty rules match compressor_read: workspace-only,
-// estimated ledger figures, nothing leaves the machine.
+// returning grep-style results bounded to whole matches, with a recoverable
+// skip= continuation whenever a page does not fit. Search output is exactly the
+// kind of bulk text that inflates context. Honesty rules match compressor_read:
+// workspace-only, estimated ledger figures, nothing leaves the machine.
 
 export interface SearchToolInput {
   query: string;
@@ -59,6 +54,52 @@ const MAX_RESULTS_DEFAULT = 200;
 const MAX_RESULTS_CAP = 1000;
 const MAX_FILES = 2000;
 const MAX_FILE_BYTES = 2_000_000;
+
+/**
+ * Search deliberately does not run the library's compress() pipeline. Every
+ * tier there assumes a single file's contents: stripComments and skeleton need
+ * a language and drop whole-line comments that are load-bearing directives
+ * (`//go:build`, `# type: ignore`, text inside a template literal); the log
+ * filters fire on a content sniff that grep output trips by accident; and
+ * truncateHeadTail cuts a numbered multi-file result mid-block, stranding later
+ * files under an earlier file's header so their matches are attributed to the
+ * wrong file. The structural tiers cannot fire at all on this shape, since each
+ * line carries a distinct number prefix. Bounding happens here instead, in
+ * whole matches, using the skip= contract this tool actually honours.
+ */
+const DEFAULT_TOKEN_BUDGET: Record<Exclude<Mode, 'full'>, number> = { optimized: 5_000, slim: 2_500 };
+
+interface SearchBudget {
+  tokens: number;
+  /** ledger transform id naming what drove the reduction */
+  source: 'host-budget' | 'search-page';
+}
+
+/**
+ * Full mode is never budget-trimmed. Otherwise a usable host budget wins, and
+ * DEFAULT_TOKEN_BUDGET is the backstop for hosts that supply none: optimized
+ * keeps the magnitude of the engine's former truncateBudget so output size is
+ * materially unchanged, and slim halves it, mirroring the library's own
+ * optimized:slim ratio for touch and commentStrip. The library's note rejecting
+ * a tighter read budget does not transfer here - it was measured against
+ * offset/limit re-reads of the same content, whereas search pages forward
+ * through skip= to matches it has not yet delivered.
+ */
+function budgetFor({ mode, tokenBudget }: SearchToolDeps): SearchBudget | undefined {
+  if (mode === 'full') return undefined;
+  return tokenBudget !== undefined && Number.isFinite(tokenBudget) && tokenBudget > 0
+    ? { tokens: tokenBudget, source: 'host-budget' }
+    : { tokens: DEFAULT_TOKEN_BUDGET[mode], source: 'search-page' };
+}
+
+/** Budget predicate sharing the read path's counter and cancellation. */
+function budgetFits(hints: OutputHints, budget: number): (text: string) => Promise<boolean> {
+  const count = tokenCounter(hints);
+  return async (text) => {
+    const tokens = await count(text);
+    return Number.isFinite(tokens) && tokens <= budget;
+  };
+}
 
 interface Match {
   absFile: string;
@@ -128,6 +169,10 @@ export function formatMatches(matches: readonly Match[], root: string): string {
 
 const fmt = (n: number): string => n.toLocaleString('en-US');
 
+/** How a query is echoed back in a result header: /regex/ or "literal". */
+const queryLabel = (input: SearchToolInput): string =>
+  input.isRegex === true ? `/${input.query}/` : `"${input.query}"`;
+
 async function fitSearchOutput(text: string, deps: SearchToolDeps): Promise<string> {
   if (deps.mode === 'full') return text;
   return await fitOutput(text, deps, 'narrow include or query; do not advance skip past omitted matches')
@@ -136,7 +181,7 @@ async function fitSearchOutput(text: string, deps: SearchToolDeps): Promise<stri
 
 async function fitMatchPage(
   matches: readonly Match[], root: string, input: SearchToolInput,
-  deps: SearchToolDeps, incomplete: ReadonlySet<string>,
+  deps: SearchToolDeps, incomplete: ReadonlySet<string>, budget: number,
 ): Promise<string> {
   const skip = input.skip ?? 0;
   const notices = [...incomplete].filter((notice) => !notice.startsWith('match limit reached;'));
@@ -150,18 +195,11 @@ async function fitMatchPage(
     const recovery = size > 0
       ? `continue with skip=${skip + size} and unchanged inputs`
       : 'no complete match fits; narrow include or query, or use compressor_read';
-    return `Showing ${size} of ${matches.length} scanned matches${notices.length ? `\nPartial scan: ${notices.join('; ')}` : ''}\n\n${body}\n[compressor: partial output; ${recovery}]`;
+    return `Showing ${fmt(size)} of ${fmt(matches.length)} scanned matches in ${fmt(counts.size)} file(s) ` +
+      `for ${queryLabel(input)}${notices.length ? `\nPartial scan: ${notices.join('; ')}` : ''}\n\n${body}\n` +
+      `[compressor: partial output; ${recovery}]`;
   };
-  const fits = async (text: string): Promise<boolean> => {
-    if (deps.cancelled?.()) throw new Error('Search cancelled');
-    let tokens: number;
-    try { tokens = await (deps.countTokens?.(text) ?? cheapEstimator(text)); }
-    catch (error) {
-      if (deps.cancelled?.()) throw error;
-      tokens = cheapEstimator(text);
-    }
-    return Number.isFinite(tokens) && tokens <= deps.tokenBudget!;
-  };
+  const fits = budgetFits(deps, budget);
   let lower = 0;
   let upper = matches.length;
   while (lower < upper) {
@@ -280,39 +318,35 @@ export async function runSearchTool(
     }
 
     const root = selectedRoot ?? deps.workspaceFolders[0] ?? '';
-    const body = formatMatches(matches, root);
-    const meta: CompressMeta = { tool: 'search', mode: deps.mode, targeted: false };
     if (capped) incomplete.add(`match limit reached; continue with skip=${skip + matches.length}`);
     const notice = incomplete.size ? `\nPartial results: ${[...incomplete].join('; ')}` : '';
+    const budget = budgetFor(deps);
+    // Over budget, re-render from the match list rather than cutting the text:
+    // every retained match keeps its own file header, and the continuation is
+    // expressed as skip=, the only recovery this tool can honour.
+    const bound = async (rendered: string): Promise<string> =>
+      budget === undefined || await budgetFits(deps, budget.tokens)(rendered)
+        ? rendered
+        : fitMatchPage(matches, root, input, deps, incomplete, budget.tokens);
     if (input.output === 'files' || input.output === 'count') {
       const counts = new Map<string, number>();
       for (const match of matches) counts.set(match.absFile, (counts.get(match.absFile) ?? 0) + 1);
       const original = `${matches.length} matches in ${counts.size} file(s)${notice}\n` + [...counts].map(([file, count]) => `${path.relative(root, file)}${input.output === 'count' ? `: ${count}` : ''}`).join('\n');
-      const fitted = await fitSearchOutput(original, deps);
-      const text = fitted === original ? original : await fitMatchPage(matches, root, input, deps, incomplete);
+      const text = await bound(original);
       return {
         text,
         isError: false, compressed: text !== original, matches: matches.length, files: fileCount,
       };
     }
-    const policy = policyFor(deps.mode);
-    const result = compress(body, meta, policy, cheapEstimator);
-    result.content = await selectOutput(body, result.content, deps);
-
-    const saved = body.length - result.content.length;
-    const worthwhile = saved >= MIN_SAVED_CHARS && saved >= body.length * MIN_SAVED_RATIO;
     const header =
       `${fmt(matches.length)}${capped ? '+ (capped)' : ''} matches in ${fmt(fileCount)} file(s) ` +
-      `for ${input.isRegex === true ? '/' : '"'}${input.query}${input.isRegex === true ? '/' : '"'}${notice}`;
+      `for ${queryLabel(input)}${notice}`;
 
-    const original = `${header}\n\n${body}`;
-    const candidate = `${header}\n\n${worthwhile ? result.content : body}`;
-    const fitted = await fitSearchOutput(candidate, deps);
-    const text = fitted === candidate ? candidate : await fitMatchPage(matches, root, input, deps, incomplete);
-    const transforms = worthwhile ? result.stats.transforms.map((transform) => transform.id) : [];
-    if (text !== candidate) transforms.push('host-budget');
+    const original = `${header}\n\n${formatMatches(matches, root)}`;
+    const text = await bound(original);
+    const transforms = text === original || budget === undefined ? [] : [budget.source];
 
-    if (text.length < original.length && cheapEstimator(text) < cheapEstimator(original)) void appendLedger({
+    if (text.length < original.length && cheapEstimator(text) < cheapEstimator(original)) void recordEvent({
       ts: new Date().toISOString(),
       agent: 'vscode',
       tool: 'search',

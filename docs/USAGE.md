@@ -23,14 +23,36 @@ for an in-editor tour of the steps below.
    and every read goes through the compressor tools. It also adds a marker-fenced
    nudge to `.github/copilot-instructions.md` for the default agent (advisory —
    VS Code can't force tool choice, so the agent/prompt are the real lever).
+   The command asks for a scope.
+   **All workspaces (user profile)** installs the agent alone to
+   `~/.copilot/agents/compressor.agent.md`, VS Code's documented user-level
+   agent folder, so **compressor** appears in the agents dropdown in every
+   workspace without writing into any repo.
+   It stays opt-in per chat: the toolset binds only in sessions where you pick
+   the agent.
+   The `/compressor` prompt and the instructions nudge stay workspace-only,
+   because user prompts live in VS Code profile storage with no documented path
+   and an always-on instructions file should not be switched on for every
+   workspace at once.
+   Custom agents share a single namespace, so a user-scope install asks before
+   replacing a `compressor` agent it did not write, and **Compressor: Status**
+   reports both scopes and warns when both define one.
+   If the agent does not appear in the dropdown, VS Code has an open issue
+   discovering user-level agents; workspace scope is unaffected.
 3. (Optional) Pick a compression level with the status-bar **`compressor: <mode>`**
   item, or **Compressor: Select Read Compression Mode**: `optimized` (default,
   preserve source and dedupe repeated log lines), `slim` (preserve source and
   compact search), or `full` (uncompressed reads/search). Explicit outline and
   command-summary tools still summarize in full mode.
 4. After installing a development VSIX, run **Developer: Reload Window** and
-  start a new chat. Regenerate steering explicitly if existing agent/prompt
-  files list only older tools; installation does not rewrite those files.
+  start a new chat.
+  Updating the extension does not rewrite steering files already on disk, so
+  re-run **Compressor: Enable Copilot Steering** to pick up a newer agent or
+  prompt.
+  Owned files carry a revision stamp: re-running updates them in place and
+  reports what it replaced, or says the install is already up to date.
+  **Compressor: Status** flags an out-of-date install so you do not have to
+  guess.
 
 ## 2. The `#compressorRead` tool (Copilot agent mode)
 
@@ -169,14 +191,22 @@ and limit the marker gave, and show me those lines.
 ## 3. Commands and retained logs
 
 Use `#compressorExecute` for noninteractive tests/builds in a trusted workspace.
+Reads stay inside the open workspace folders, with one deliberate exception:
+files under VS Code's own `GitHub.copilot-chat/chat-session-resources` folder,
+where it spills a tool result that was too large to pass inline.
+That file is this extension's own output being handed back, and refusing it only
+drove the model to read the file uncompressed through the shell instead.
+No other path outside the workspace is readable.
+
 Review the command and working directory at confirmation: workspace validation
 is not a process sandbox. `timeoutSeconds` defaults to 120 and accepts 1-600.
 
 ```text
-Use #compressorExecute in /home/jason/projects/compressor-vscode to run
-"env -u COMPRESSOR_NO_LEDGER npm test -- tests/search-tool.test.ts" with
-timeoutSeconds=120. Inspect the exit status. If diagnostics were omitted, use
-#compressorLog with the returned ID instead of rerunning the command.
+Use #compressorExecute to run
+"env -u COMPRESSOR_NO_LEDGER npm test -- tests/search-tool.test.ts" in the
+workspace root with timeoutSeconds=120. Inspect the exit status. If diagnostics
+were omitted, use #compressorLog with the returned ID instead of rerunning the
+command.
 ```
 
 The response includes exit status and a retained log ID. The **Compressor
@@ -247,7 +277,24 @@ does not simulate the model host's token budget or tokenizer.
 
 ## Settings
 
+- `compressor.projectLabel` — `hashed` | `name` (default `hashed`): how the
+  ledger records which workspace a reduction came from, so the savings report can
+  show a per-project breakdown.
+  `hashed` records a keyed digest of the workspace path.
+  The key is generated on first use at `~/.compressor/project-salt`, owner-only,
+  deliberately outside the ledger directory so it never travels with a shared
+  ledger, and never written into the ledger itself, so a report you share cannot
+  be tested against guessed project names.
+  The key and the labelling come from the compressor library itself, shared with
+  the CLI, so a folder gets one label whichever tool recorded the event.
+  Delete the file to rotate it; existing events keep their old labels and show as
+  a separate group.
+  `name` records the workspace folder name in clear text.
+  The absolute path is never recorded in either mode, and events written by other
+  agents or before this setting existed group under `unattributed`.
 - `compressor.mode` — `full` | `optimized` | `slim` (default `optimized`): the
-  read tool's compression level.
+  read/search output policy.
+  `slim` bounds search results about twice as tightly as `optimized`.
+  `full` disables automatic bounding.
 - `compressor.savingsWindow` — `7d` | `30d` | `all` (default `30d`): lookback for
   the ticker and report.

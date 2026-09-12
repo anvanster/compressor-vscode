@@ -6,7 +6,8 @@ import { canonicalWorkspacePath } from './workspace-file';
 import { measureOperation } from '../operation-metrics';
 import { fitOutput } from './output-policy';
 import type { OutputHints } from './output-policy';
-import { appendLedger, cheapEstimator } from '@astudioplus/compressor';
+import { cheapEstimator } from '@astudioplus/compressor';
+import { recordEvent } from '../ledger';
 import type { LedgerEvent } from '@astudioplus/compressor';
 import { stripVTControlCharacters } from 'node:util';
 
@@ -20,6 +21,24 @@ export interface ExecuteInput {
   cwd?: string;
   timeoutSeconds?: number;
 }
+
+/** A command that never ran: nothing was captured and no log was retained. */
+export interface ExecuteRejected {
+  ran: false;
+  message: string;
+}
+
+/** A command that ran or was stopped; its combined output is under logId. */
+export interface ExecuteRan {
+  ran: true;
+  /** human-readable outcome: 'exit code 0', 'timed out', 'spawn failed: …' */
+  status: string;
+  /** process exit code; absent when the command was stopped or never exited */
+  exitCode?: number;
+  logId: string;
+}
+
+export type ExecuteOutcome = ExecuteRejected | ExecuteRan;
 
 export interface ExecuteDeps {
   workspaceFolders: readonly string[];
@@ -82,27 +101,88 @@ export function retrieveLog(id: string, offset = 1, limit = 100, characterOffset
   return `${lines.length} retained lines; range ${offset}-${Math.min(lines.length, offset + limit - 1)}\n${page}${characterOffset + page.length < body.length ? `\nPartial range: repeat with the same offset/limit and characterOffset=${characterOffset + page.length}` : ''}`;
 }
 
-export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Promise<string> {
-  if (!deps.trusted) return 'Execution requires a trusted workspace.';
-  if (!input.command?.trim()) return 'A command is required.';
+// `bash -lc '...'` / `sh -c '...'` wrappers hide the real command from any check.
+// the -c may be bundled with other flags, as in `bash -lc '...'`
+const SHELL_WRAPPER = /^\s*(?:\/usr\/bin\/env\s+)?(?:ba|z|da)?sh\s+(?:-[a-z]+\s+)*-[a-z]*c\s+(['"])([\s\S]*)\1\s*$/;
+
+// A command that only prints a file, with nothing else happening to the output.
+// A pipe, redirect or second command means the text is being processed rather
+// than read, which is a legitimate use of a shell.
+const PAGER = /^(?:cat|head|tail|nl|bat|more|less)\b(?:\s+-{1,2}[\w-]+(?:[= ]\d+)?)*\s+(\S+)$/;
+const SED_RANGE = /^sed\s+-n\s+['"]?\d+(?:,\d+)?p['"]?\s+(\S+)$/;
+
+// `||` is listed before any bare `|` so a pipe is never mistaken for a separator.
+const SEGMENT_SPLIT = /[;\n]|&&|\|\|/;
+
+/**
+ * Command output is summarized for diagnostics: a 240-line file read this way
+ * comes back as a few dozen sampled lines, which is the wrong shape for a file
+ * and silently drops most of it. compressor_read returns the range asked for
+ * and states its own coverage, so redirect the obvious cases rather than
+ * letting the shell become an uncompressed, lossy read path.
+ */
+export function pureFileRead(command: string): string | undefined {
+  let text = command.trim();
+  const wrapped = SHELL_WRAPPER.exec(text);
+  if (wrapped?.[2] !== undefined) text = wrapped[2].trim();
+  // A compound command is still a file read if any part of it is one. Observed
+  // in the wild: `printf ...; cat package.json; printf ...; sed -n '1,200p'
+  // README.md` — two whole files, read raw, between two harmless printfs.
+  for (const segment of text.split(SEGMENT_SPLIT)) {
+    const part = segment.trim();
+    // piped, redirected or substituted: the text is being processed, which is
+    // what a shell is for. `tail -f` is a follow, not a read.
+    if (part === '' || /[|><]|\$\(|`/.test(part) || /\s-{1,2}(?:f\b|-follow\b)/.test(part)) {
+      continue;
+    }
+    const file = (PAGER.exec(part) ?? SED_RANGE.exec(part))?.[1];
+    if (file !== undefined) return file;
+  }
+  return undefined;
+}
+
+export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Promise<ExecuteOutcome> {
+  const reject = (message: string): ExecuteRejected => ({ ran: false, message });
+  if (!deps.trusted) return reject('Execution requires a trusted workspace.');
+  if (!input.command?.trim()) return reject('A command is required.');
+  const readInstead = pureFileRead(input.command);
+  if (readInstead !== undefined) {
+    return reject(
+      `That command only prints a file. Command output is summarized for diagnostics, so reading ` +
+      `${readInstead} this way returns a sample of it, not the file. Use compressor_read ${readInstead} ` +
+      '(add offset/limit for a range) — it returns what you asked for and states its own coverage.',
+    );
+  }
   const root = deps.workspaceFolders[0];
-  if (!root) return 'Open a workspace before running commands.';
-  if (deps.signal?.aborted) return 'Command cancelled before execution.';
+  if (!root) return reject('Open a workspace before running commands.');
+  if (deps.signal?.aborted) return reject('Command cancelled before execution.');
   const timeout = input.timeoutSeconds ?? 120;
-  if (!Number.isFinite(timeout) || timeout < 1 || timeout > 600) return 'timeoutSeconds must be between 1 and 600.';
+  if (!Number.isFinite(timeout) || timeout < 1 || timeout > 600) return reject('timeoutSeconds must be between 1 and 600.');
   const cwd = await canonicalWorkspacePath(path.resolve(root, input.cwd ?? '.'), deps.workspaceFolders);
-  const outcome = await new Promise<{ text: string; status: string }>((resolve) => {
+  const outcome = await new Promise<{ text: string; status: string; exitCode?: number }>((resolve) => {
     const child = spawn(input.command, { cwd, shell: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks: Buffer[] = [];
     let bytes = 0;
     let stopped: string | undefined;
     let settled = false;
+    let killing = false;
     const stop = (reason: string): void => {
       stopped ??= reason;
+      // The output-limit path calls stop() per chunk; kill the tree only once.
+      if (killing || child.pid === undefined) return;
+      killing = true;
+      // stop() runs inside stream and timer callbacks, so it must never throw.
+      const killShell = (): void => { try { child.kill('SIGKILL'); } catch {} };
       try {
-        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
-        else child.kill('SIGKILL');
-      } catch {}
+        if (process.platform !== 'win32') {
+          process.kill(-child.pid, 'SIGKILL'); // detached: whole process group
+        } else {
+          // shell: true starts cmd.exe; killing only that orphans the real
+          // work, so ask Windows to terminate the tree beneath it.
+          spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
+            .on('error', killShell);
+        }
+      } catch { killShell(); }
     };
     const accept = (chunk: Buffer): void => {
       const remaining = MAX_BYTES - bytes;
@@ -116,15 +196,20 @@ export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Pr
     const timer = setTimeout(() => stop('timed out'), timeout * 1000);
     deps.signal?.addEventListener('abort', cancel, { once: true });
     if (deps.signal?.aborted) cancel();
-    const finish = (status: string): void => {
+    const finish = (status: string, exitCode?: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       deps.signal?.removeEventListener('abort', cancel);
-      resolve({ text: Buffer.concat(chunks).toString('utf8'), status: stopped ?? status });
+      resolve({
+        text: Buffer.concat(chunks).toString('utf8'),
+        status: stopped ?? status,
+        // a stopped command's exit code describes the kill, not the command
+        exitCode: stopped === undefined ? exitCode : undefined,
+      });
     };
     child.on('error', (error) => finish(`spawn failed: ${error.message}`));
-    child.on('close', (code, signal) => finish(code === null ? `signal ${signal}` : `exit code ${code}`));
+    child.on('close', (code, signal) => finish(code === null ? `signal ${signal}` : `exit code ${code}`, code ?? undefined));
   });
   pruneLogs();
   while (logs.size >= MAX_LOGS) {
@@ -136,20 +221,32 @@ export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Pr
   const timer = setTimeout(() => logs.delete(id), TTL);
   timer.unref();
   logs.set(id, { text: outcome.text, expires: Date.now() + TTL, timer });
-  const summary = summarizeLog(outcome.text);
-  return `Command ${outcome.status}. stdout/stderr combined.\nLog ${id} retained for up to 30 minutes (last ${MAX_LOGS} commands). Use compressor_log with id, offset and limit for exact retained output.\n${summary !== stripVTControlCharacters(outcome.text) ? 'Partial summary; omitted lines remain in the retained log.\n' : ''}${summary}`;
+  return { ran: true, status: outcome.status, exitCode: outcome.exitCode, logId: id };
 }
 
+/**
+ * Turn a run into what the model sees. All prose lives here: nothing downstream
+ * has to parse a status or a log id back out of an English sentence.
+ */
 export async function finalizeExecution(
-  text: string,
+  outcome: ExecuteOutcome,
   hints: OutputHints = {},
-  record: (event: LedgerEvent) => Promise<void> = appendLedger,
-): Promise<{ text: string; notice: string; raw?: string }> {
-  const logId = /Log ([\w-]+) retained/.exec(text)?.[1];
-  const log = logId === undefined ? undefined : logs.get(logId);
-  if (log === undefined) return { text, notice: text };
-  const status = text.split('\n')[0] ?? '';
-  const bounded = await fitOutput(text, hints, `${status}; retrieve compressor_log id=${logId}`);
+  record: (event: LedgerEvent) => Promise<void> = recordEvent,
+): Promise<{ text: string; notice: string; isError: boolean; raw?: string }> {
+  const log = outcome.ran ? logs.get(outcome.logId) : undefined;
+  if (!outcome.ran || log === undefined) {
+    const message = outcome.ran
+      ? `Command ${outcome.status}, but its retained log is no longer available.`
+      : outcome.message;
+    return { text: message, notice: message, isError: true };
+  }
+  const logId = outcome.logId;
+  const status = `Command ${outcome.status}. stdout/stderr combined.`;
+  const summary = summarizeLog(log.text);
+  const full = `${status}\nLog ${logId} retained for up to 30 minutes (last ${MAX_LOGS} commands). ` +
+    'Use compressor_log with id, offset and limit for exact retained output.\n' +
+    `${summary !== stripVTControlCharacters(log.text) ? 'Partial summary; omitted lines remain in the retained log.\n' : ''}${summary}`;
+  const bounded = await fitOutput(full, hints, `${status}; retrieve compressor_log id=${logId}`);
   const delivered = bounded || `${status}\nLog ${logId}; budget too small for summary.`;
   const saved = log.text.length - delivered.length;
   const tokensIn = cheapEstimator(log.text);
@@ -165,7 +262,27 @@ export async function finalizeExecution(
       transforms: ['command-summary'],
     }).catch(() => {});
   }
-  return { text: delivered, notice, raw: log.text };
+  return { text: delivered, notice, isError: outcome.exitCode !== 0, raw: log.text };
+}
+
+/**
+ * What the Commands channel shows after a run, and whether to reveal it. An
+ * agent loop can run many commands in a row, so the panel is taken over only
+ * when a command actually failed, and a run never interrupts with a toast.
+ */
+export function commandReport(
+  command: string,
+  result: { notice: string; isError: boolean; text: string; raw?: string },
+): { body: string; reveal: boolean } {
+  return {
+    body: [
+      `$ ${command}`,
+      result.notice,
+      'Latest captured output (may be partial after cancellation or limits):',
+      stripVTControlCharacters(result.raw ?? result.text),
+    ].join('\n'),
+    reveal: result.isError,
+  };
 }
 
 export function registerExecuteTools(onComplete: () => void = () => {}): vscode.Disposable {
@@ -185,24 +302,21 @@ export function registerExecuteTools(onComplete: () => void = () => {}): vscode.
         if (token.isCancellationRequested) controller.abort();
         try {
           const result = await measureOperation('execute', false, async () => {
-            const text = await runExecuteTool(input, {
-            workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
-            trusted: vscode.workspace.isTrusted,
-            signal: controller.signal,
+            const outcome = await runExecuteTool(input, {
+              workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
+              trusted: vscode.workspace.isTrusted,
+              signal: controller.signal,
             });
-            return finalizeExecution(text, {
-            tokenBudget: tokenizationOptions?.tokenBudget,
-            countTokens: tokenizationOptions ? (value) => tokenizationOptions.countTokens(value, token) : undefined,
-            cancelled: () => token.isCancellationRequested,
+            return finalizeExecution(outcome, {
+              tokenBudget: tokenizationOptions?.tokenBudget,
+              countTokens: tokenizationOptions ? (value) => tokenizationOptions.countTokens(value, token) : undefined,
+              cancelled: () => token.isCancellationRequested,
             });
-          }, (result) => ({ text: result.text, isError: !result.notice.startsWith('Command exit code 0.') }));
+          }, (result) => ({ text: result.text, isError: result.isError }));
+          const report = commandReport(input.command, result);
           channel.clear();
-          channel.appendLine(`$ ${input.command}`);
-          channel.appendLine(result.notice);
-          channel.appendLine('Latest captured output (may be partial after cancellation or limits):');
-          channel.appendLine(stripVTControlCharacters(result.raw ?? result.text));
-          channel.show(true);
-          void vscode.window.showInformationMessage(`Compressor: ${result.notice}`);
+          channel.appendLine(report.body);
+          if (report.reveal) channel.show(true);
           onComplete();
           return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result.text)]);
         } catch (error) {

@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import { createLedgerSource } from './ledger-source';
+import { setProjectResolver } from './ledger';
+import { createProjectResolver } from './project-resolver';
+import { ensureProjectSalt, normalizeProjectLabelMode, projectLabel } from '@astudioplus/compressor';
 import { SavingsTicker } from './ticker';
 import { SavingsPanel } from './savings-panel';
 import { registerStatusCommand } from './status';
@@ -7,7 +10,12 @@ import { registerReadTool } from './tools/read';
 import { registerSearchTool } from './tools/search';
 import { registerOutlineTool } from './tools/outline';
 import { registerExecuteTools } from './tools/execute';
-import { registerSteeringCommands } from './steering';
+import {
+  STEERING_REVISION,
+  registerSteeringCommands,
+  steeringStatus,
+  userSteeringStatus,
+} from './steering';
 import { registerManageCommands } from './manage';
 import { ModeStatusItem, registerSelectModeCommand } from './mode-status';
 import { registerCountCommand } from './count-tokens';
@@ -23,10 +31,43 @@ import { registerCompressSelectionCommand } from './compress-preview';
 // compressor_read tool is invoked — workspace files.
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Labelling comes from the library, so this extension and the CLI hooks
+  // cannot drift: one key (~/.compressor/project-salt), one algorithm. The key
+  // is never written to the ledger, so a shared report cannot be tested against
+  // candidate project names.
+  setProjectResolver(createProjectResolver({
+    salt: ensureProjectSalt,
+    folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    mode: () => normalizeProjectLabelMode(
+      vscode.workspace.getConfiguration('compressor').get('projectLabel'),
+    ),
+    label: projectLabel,
+  }));
+
+  // Steering that this build would rewrite is surfaced passively: a warning on
+  // the ticker, a banner in the report, and a line in "Compressor: Status".
+  // Never a notification — an agent loop should not be interrupted by one.
+  const staleScopes = async (): Promise<string[]> => {
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const [workspace, user] = await Promise.all([
+      folder === undefined ? Promise.resolve(undefined) : steeringStatus(folder),
+      userSteeringStatus(),
+    ]);
+    const scopes: string[] = [];
+    if (workspace?.state === 'outdated') scopes.push('this workspace');
+    if (user.state === 'outdated') scopes.push('your user profile');
+    return scopes;
+  };
+  const steeringNotice = async (): Promise<string | undefined> => {
+    const scopes = await staleScopes().catch(() => []);
+    return scopes.length === 0 ? undefined : `Copilot steering in ${scopes.join(' and ')} is older ` +
+      `than this build writes (v${STEERING_REVISION}). Run "Compressor: Enable Copilot Steering" to update it.`;
+  };
+
   const source = createLedgerSource();
-  const ticker = new SavingsTicker(source);
+  const ticker = new SavingsTicker(source, async () => (await staleScopes()).length > 0);
   const mode = new ModeStatusItem();
-  const panel = new SavingsPanel(source);
+  const panel = new SavingsPanel(source, steeringNotice);
   const channel = vscode.window.createOutputChannel('Compressor');
 
   context.subscriptions.push(

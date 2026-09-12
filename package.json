@@ -2,7 +2,7 @@
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
     "description": "Reduce tool-output traffic in Copilot with source-preserving reads, search, outlines, confirmed commands and retained logs. Includes output-reduction reports and steering.",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "publisher": "aStudioPlus",
     "icon": "assets/icon.png",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
@@ -113,6 +113,16 @@
                     "type": "boolean",
                     "default": false,
                     "description": "Append an 'actual usage' section to the savings report with authoritative token counts parsed from this project's Claude Code session transcripts (~/.claude). Off by default — it covers Claude Code only, not Copilot. Enable to see real per-model usage alongside the estimated savings."
+                },
+                "compressor.projectLabel": {
+                    "type": "string",
+                    "enum": ["hashed", "name"],
+                    "enumDescriptions": [
+                        "Machine-local keyed hash of the workspace path. The key never leaves this machine and is never written to the ledger, so a shared report cannot be reversed to project names.",
+                        "The workspace folder name in clear text. Anyone you share the report or ledger with sees your project names."
+                    ],
+                    "default": "hashed",
+                    "description": "How the ledger records which workspace a reduction came from, so the savings report can break totals down by project. Hashed by default because the report is shareable; switch to 'name' only if clear-text project names are acceptable in it. The absolute path is never recorded either way."
                 }
             }
         },
@@ -155,7 +165,7 @@
                 "toolReferenceName": "compressorRead",
                 "displayName": "Compressed File Read",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Read workspace text with original line numbers. Source code and comments are preserved; repeated log lines may be collapsed with recovery ranges. Prefer relevant offset/limit ranges or a qualified symbol name. Use compressor_outline to discover symbols. Exact ranges and symbols are uncompressed. Whole-file reads suit small files or broad edits. Canonical workspace paths and regular text files up to 8 MB only.",
+                "modelDescription": "Read workspace text with original line numbers. Source code and comments are preserved; repeated log lines may be collapsed with recovery ranges. Prefer relevant offset/limit ranges or a qualified symbol name. Use compressor_outline to discover symbols. Exact ranges and symbols are uncompressed. Whole-file reads suit small files or broad edits. Canonical workspace paths, plus tool results VS Code spilled to its own chat-session-resources folder; regular text files up to 8 MB only.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -329,7 +339,7 @@
         "package": "vsce package --no-dependencies"
     },
     "dependencies": {
-        "@astudioplus/compressor": "^0.3.3"
+        "@astudioplus/compressor": "^0.4.0"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

@@ -2,7 +2,7 @@ process.env.COMPRESSOR_NO_LEDGER = '1'; // never touch the real ledger from test
 
 import { describe, expect, it } from 'vitest';
 import { OMISSION_MARKER } from '@astudioplus/compressor';
-import { runOutlineTool } from '../src/tools/outline';
+import { retargetMarkers, runOutlineTool } from '../src/tools/outline';
 import type { ReadToolDeps } from '../src/tools/read';
 
 const WS = '/ws/project';
@@ -78,5 +78,58 @@ describe('runOutlineTool', () => {
 
   it('requires a path', async () => {
     expect((await runOutlineTool({ path: '' }, deps('x'))).isError).toBe(true);
+  });
+});
+
+describe('outline honesty', () => {
+  it('reports a missing file without leaking the absolute path', async () => {
+    const outcome = await runOutlineTool({ path: 'src/commands.ts' }, {
+      workspaceFolders: [WS],
+      mode: 'optimized',
+      readFile: async (absPath) => { throw new Error(`ENOENT: no such file or directory, realpath '${absPath}'`); },
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain('compressor_outline');
+    expect(outcome.text).toContain('not found in the workspace');
+    expect(outcome.text).not.toContain('realpath');
+    expect(outcome.text).not.toContain(WS);
+  });
+
+  it('says bodies are omitted, so names are not mistaken for behaviour', async () => {
+    const outcome = await runOutlineTool({ path: 'src/a.ts' }, {
+      workspaceFolders: [WS],
+      mode: 'optimized',
+      // big enough that the outline genuinely beats the source; on a tiny file
+      // selectOutput correctly returns the source instead
+      readFile: async () => Array.from(
+        { length: 40 },
+        (_, i) => `  run${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
+      ).join('\n'),
+      symbols: async () => [{
+        name: 'Service', detail: '', start: 1, end: 120,
+        children: Array.from({ length: 40 }, (_, i) => ({
+          name: `run${i}`, detail: '', start: i * 3 + 1, end: i * 3 + 3, children: [],
+        })),
+      }],
+    });
+    expect(outcome.isError).toBe(false);
+    expect(outcome.text).toContain('signatures only, bodies omitted');
+    expect(outcome.text).toContain('compressor_read');
+    expect(outcome.text).toContain('Service.run0');
+  });
+
+  it('never points the model at the built-in read, which the agent cannot use', () => {
+    const abs = `${WS}/src/a.ts`;
+    const engineMarker =
+      `[compressor: lines 5-7 omitted (~26 est tokens) — Read ${abs} with offset=5 and limit=3 to retrieve]`;
+    const fixed = retargetMarkers(engineMarker, abs, 'src/a.ts');
+    expect(fixed).toContain('compressor_read src/a.ts offset=5 limit=3');
+    expect(fixed).not.toContain(`Read ${abs}`);
+    // the absolute path leaks the user's home directory into model context
+    expect(fixed).not.toContain(abs);
+  });
+
+  it('leaves unrelated text alone', () => {
+    expect(retargetMarkers('nothing to do here', '/w/a.ts', 'a.ts')).toBe('nothing to do here');
   });
 });

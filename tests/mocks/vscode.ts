@@ -4,6 +4,10 @@
 // sources touch exist, and tests exercise the pure helpers, not the host.
 
 export const StatusBarAlignment = { Left: 1, Right: 2 } as const;
+
+export class ThemeColor {
+  constructor(public readonly id: string) {}
+}
 export const ViewColumn = { One: 1, Two: 2, Active: -1 } as const;
 export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;
 

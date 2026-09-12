@@ -1,4 +1,7 @@
-.github/
+# Steering output the extension writes into whatever repo it is enabled in,
+# including this one. CI workflows under .github/ stay tracked.
+.github/agents/compressor.agent.md
+.github/prompts/compressor.prompt.md
 docs/DEVELOPMENT-TESTING.md
 docs/IMPLEMENTATION-PLAN.md
 node_modules/
