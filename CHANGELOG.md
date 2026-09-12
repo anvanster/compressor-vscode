@@ -104,8 +104,9 @@
   the workspace path.
   The key is created on first use at `~/.compressor/project-salt`, owner-only and
   outside the ledger directory so it never travels with a shared ledger.
-  The key and the labelling come from the compressor library (0.4.0), shared
-  with the CLI, so a folder gets one label whichever tool records the event, and
+  The key and the labelling come from the compressor library (0.5.0), shared
+  with the CLI hooks, which populate the same label from the agent's working
+  directory — so a folder gets one label whichever tool records the event, and
   the library renders the `by project` breakdown in the report itself.
   Set it to `name` for clear-text folder names; the absolute path is never
   recorded either way.
