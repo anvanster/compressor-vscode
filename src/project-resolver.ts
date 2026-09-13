@@ -11,6 +11,8 @@ export interface ProjectResolverDeps {
   label: (workspacePath: string, mode: ProjectLabelMode, salt: string) => string;
 }
 
+const MAX_LOAD_ATTEMPTS = 12;
+
 /**
  * The key is read asynchronously, so the first events in a window can be
  * recorded before it arrives. Attempting it once at activation left any window
@@ -20,12 +22,19 @@ export interface ProjectResolverDeps {
  *
  * So retry on demand: at most one load in flight, and a failure costs only the
  * labels on events until the next attempt succeeds, rather than the window.
+ *
+ * Retries are capped, because a key that can never be created (an unwritable
+ * home) would otherwise cost one filesystem round-trip per compression event
+ * for the lifetime of the window. The cap is far above the handful of attempts
+ * a lost creation race needs.
  */
 export function createProjectResolver(deps: ProjectResolverDeps): () => string | undefined {
   let salt: string | undefined;
   let loading = false;
+  let attempts = 0;
   const load = (): void => {
-    if (salt !== undefined || loading) return;
+    if (salt !== undefined || loading || attempts >= MAX_LOAD_ATTEMPTS) return;
+    attempts += 1;
     loading = true;
     void deps.salt().then(
       (value) => {

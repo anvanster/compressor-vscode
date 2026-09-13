@@ -133,8 +133,9 @@ export async function completeStructure(
   }
   if (symbols.length === 0) return undefined;
   return `[compressor: ${requested} does not fit the budget. COMPLETE list of its ` +
-    'declarations follows: every symbol in the file is here, nothing omitted. Bodies are ' +
-    `not included — read one with compressor_read ${requested} offset=N limit=M.]\n` +
+    'declarations follows: every symbol the language provider reported for the file is here, ' +
+    'nothing dropped to fit the budget. Bodies are not included — read one with ' +
+    `compressor_read ${requested} offset=N limit=M.]\n` +
     formatSymbols(symbols);
 }
 

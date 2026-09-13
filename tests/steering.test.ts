@@ -237,6 +237,23 @@ describe('user-profile steering (~/.copilot/agents)', () => {
     expect(await readFile(neighbour, 'utf8')).toBe('not ours');
   });
 
+  it("leaves somebody else's compressor agent in place on remove", async () => {
+    // custom agents share one namespace, so a `compressor` agent in the user
+    // profile is not necessarily ours to delete
+    const home = await tempDir('compressor-vscode-steering-userhome-');
+    const foreign = '---\nname: compressor\n---\nsomeone else\n';
+    await mkdir(userAgentDir(home), { recursive: true });
+    await writeFile(userAgentPath(home), foreign, 'utf8');
+
+    expect(await removeUserSteering(home)).toEqual([]);
+    expect(await readFile(userAgentPath(home), 'utf8')).toBe(foreign);
+
+    // the command path deletes it only after the user has confirmed
+    expect(await removeUserSteering(home, { force: true }))
+      .toEqual([userAgentPath(home)]);
+    expect(await exists(userAgentPath(home))).toBe(false);
+  });
+
   it('detects a foreign compressor agent so an install cannot silently replace it', async () => {
     const home = await tempDir('compressor-vscode-steering-userhome-');
     expect(await userAgentIsForeign(home)).toBe(false); // absent is not foreign

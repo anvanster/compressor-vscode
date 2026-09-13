@@ -149,9 +149,12 @@ obey it literally.
   To describe anything outside that range, fetch it first with the \`offset\`
   the marker gives you. Never describe a default value, a signature, or a
   behaviour that was outside the lines you received.
-- \`COMPLETE list of its declarations\` means the list is exhaustive. Trust it:
-  do not re-read the file hunting for symbols that are not on it. Bodies are
-  excluded, so read a named range before you say what any of them does.
+- \`COMPLETE list of its declarations\` means nothing was dropped to fit the
+  budget: it is everything the language provider reported for that file. Work
+  from it rather than re-reading the whole file; if a symbol you have other
+  evidence for is missing, search for it instead of assuming it does not exist.
+  Bodies are excluded, so read a named range before you say what any of them
+  does.
 - \`signatures only, bodies omitted\` is a shape, not an implementation. Names
   are not evidence of behaviour.
 - A \`[compressor: ...]\` marker always names the exact call that retrieves what
@@ -418,8 +421,19 @@ export async function installUserSteering(home: string = os.homedir()): Promise<
   return writeOwned(userAgentDir(home), [{ relativePath: 'compressor.agent.md', content: USER_AGENT_CONTENT }]);
 }
 
-export async function removeUserSteering(home: string = os.homedir()): Promise<string[]> {
+/**
+ * The shared user namespace may hold a `compressor` agent this extension never
+ * wrote, so removal is ownership-checked the way installing is: a foreign file
+ * is left in place and no path is reported as deleted. `force` is for the one
+ * caller that has already asked the user about it.
+ */
+export async function removeUserSteering(
+  home: string = os.homedir(),
+  options: { readonly force?: boolean } = {},
+): Promise<string[]> {
   const file = userAgentPath(home);
+  const existing = await readFileOrNull(file);
+  if (existing !== null && !isOwned(existing) && options.force !== true) return [];
   await rm(file, { force: true });
   try {
     await rmdir(userAgentDir(home)); // only succeeds when empty
@@ -541,7 +555,24 @@ export function registerSteeringCommands(): vscode.Disposable {
     if (scope === undefined) return;
     try {
       if (scope === 'user') {
-        await removeUserSteering();
+        if (!(await userSteeringInstalled())) {
+          void vscode.window.showInformationMessage(
+            `Compressor: no user-profile agent at ${userAgentPath()}. Workspace steering is unchanged.`,
+          );
+          return;
+        }
+        if (await userAgentIsForeign()) {
+          const choice = await vscode.window.showWarningMessage(
+            `Compressor: ${userAgentPath()} exists but was not written by this extension. ` +
+              'Custom agents share one namespace, so this is likely somebody else\'s agent.',
+            { modal: true },
+            'Delete it',
+          );
+          if (choice !== 'Delete it') return;
+          await removeUserSteering(os.homedir(), { force: true });
+        } else {
+          await removeUserSteering();
+        }
         void vscode.window.showInformationMessage(
           'Compressor: user-profile compressor agent removed. Workspace steering is unchanged.',
         );

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { canonicalWorkspacePath } from './workspace-file';
+import { canonicalWorkspacePath, containsPath } from './workspace-file';
 import { measureOperation } from '../operation-metrics';
 import { fitOutput } from './output-policy';
 import type { OutputHints } from './output-policy';
@@ -135,26 +135,50 @@ export function pureFileRead(command: string): string | undefined {
     if (part === '' || /[|><]|\$\(|`/.test(part) || /\s-{1,2}(?:f\b|-follow\b)/.test(part)) {
       continue;
     }
+    // `tail` asks for the END of a file, and compressor_read counts
+    // offset/limit from the top with no last-N form, so redirecting `tail -n
+    // 50 server.log` would name a tool that cannot answer the question. Only
+    // the `tail -n +N` form (start AT line N) is a top-counted read.
+    if (/^tail\b/.test(part) && !/\s\+\d+\b/.test(part)) continue;
     const file = (PAGER.exec(part) ?? SED_RANGE.exec(part))?.[1];
-    if (file !== undefined) return file;
+    if (file !== undefined) return unquote(file);
   }
   return undefined;
+}
+
+function unquote(file: string): string {
+  const quoted = /^(['"])([\s\S]*)\1$/.exec(file);
+  return quoted?.[2] ?? file;
+}
+
+/**
+ * Only redirect a path compressor_read can actually serve: it reads inside the
+ * open workspace folders and refuses anything else, so rejecting `cat
+ * /etc/hosts` in its favour is a dead end that costs the model two turns. A
+ * shell-expanded home or variable path (`~/.npmrc`, `$HOME/...`) cannot be
+ * resolved here and is not a workspace path either.
+ */
+export function readableByCompressor(file: string, cwd: string, folders: readonly string[]): boolean {
+  if (folders.length === 0 || file.startsWith('~') || file.includes('$')) return false;
+  const candidate = path.isAbsolute(file) ? path.normalize(file) : path.normalize(path.resolve(cwd, file));
+  return folders.some((folder) => path.relative(folder, candidate) !== '' && containsPath(folder, candidate));
 }
 
 export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Promise<ExecuteOutcome> {
   const reject = (message: string): ExecuteRejected => ({ ran: false, message });
   if (!deps.trusted) return reject('Execution requires a trusted workspace.');
   if (!input.command?.trim()) return reject('A command is required.');
+  const root = deps.workspaceFolders[0];
+  if (!root) return reject('Open a workspace before running commands.');
   const readInstead = pureFileRead(input.command);
-  if (readInstead !== undefined) {
+  if (readInstead !== undefined
+      && readableByCompressor(readInstead, path.resolve(root, input.cwd ?? '.'), deps.workspaceFolders)) {
     return reject(
       `That command only prints a file. Command output is summarized for diagnostics, so reading ` +
       `${readInstead} this way returns a sample of it, not the file. Use compressor_read ${readInstead} ` +
       '(add offset/limit for a range) — it returns what you asked for and states its own coverage.',
     );
   }
-  const root = deps.workspaceFolders[0];
-  if (!root) return reject('Open a workspace before running commands.');
   if (deps.signal?.aborted) return reject('Command cancelled before execution.');
   const timeout = input.timeoutSeconds ?? 120;
   if (!Number.isFinite(timeout) || timeout < 1 || timeout > 600) return reject('timeoutSeconds must be between 1 and 600.');

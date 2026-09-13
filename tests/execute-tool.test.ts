@@ -188,6 +188,19 @@ it('leaves real shell work alone', async () => {
   }
 });
 
+it('does not redirect reads compressor_read cannot serve', async () => {
+  // last-N reads: compressor_read counts offset/limit from the top of the file
+  for (const command of ['tail -n 50 server.log', 'tail -50 server.log', 'tail server.log']) {
+    expect(pureFileRead(command), command).toBeUndefined();
+  }
+  // outside the workspace: compressor_read refuses it, so redirecting there is
+  // a dead end rather than a cheaper read
+  for (const command of ['cat /etc/hosts', 'cat ~/.npmrc', 'cat $HOME/.npmrc']) {
+    const outcome = await runExecuteTool({ command, timeoutSeconds: 10 }, DEPS);
+    expect(outcome.ran, command).toBe(true);
+  }
+});
+
 it('names the file it wants read through the proper tool', () => {
   expect(pureFileRead("sed -n '1,240p' package.json")).toBe('package.json');
   expect(pureFileRead('cat src/tools/read.ts')).toBe('src/tools/read.ts');

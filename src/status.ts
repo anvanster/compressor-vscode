@@ -72,6 +72,7 @@ export interface StatusInput {
 /** Pure-ish report assembly (reads config files via adapters), for tests. */
 export async function buildStatusReport(input: StatusInput): Promise<string> {
   const lines: string[] = ['compressor status', ''];
+  let workspaceSteering: SteeringStatus | undefined;
 
   if (input.projectDir === undefined) {
     lines.push('no workspace folder open — adapter status unavailable');
@@ -92,6 +93,7 @@ export async function buildStatusReport(input: StatusInput): Promise<string> {
       }
     }
     const steering = await steeringStatus(input.projectDir);
+    workspaceSteering = steering;
     lines.push(
       `copilot steering (compressor agent + /compressor): ${
         steering.state === 'absent'
@@ -122,8 +124,8 @@ export async function buildStatusReport(input: StatusInput): Promise<string> {
   if (userSteering.state === 'current') {
     lines.push('  the "compressor" agent is offered in every workspace');
   }
-  if (userSteering.state !== 'absent' && input.projectDir !== undefined
-      && (await steeringStatus(input.projectDir)).state !== 'absent') {
+  if (userSteering.state !== 'absent' && workspaceSteering !== undefined
+      && workspaceSteering.state !== 'absent') {
     lines.push(
       'note: this workspace and your user profile both define a "compressor" agent; ' +
         'VS Code does not document which wins, so remove one if the dropdown looks wrong.',

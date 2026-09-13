@@ -60,7 +60,7 @@ export function buildSavingsHtml(
 ): string {
   const base = renderSavingsHtml(events, dir, windowLabel(normalizeWindow(window)))
     .replace('<h1>compressor savings', '<h1>Tool-output reduction')
-    .replace('<body>', `<body>${steeringNoticeHtml(extras.steeringNotice)}`)
+    .replace(/<body[^>]*>/, (tag) => `${tag}${steeringNoticeHtml(extras.steeringNotice)}`)
     .replace('</body>', `<p>Ledger totals are gross estimated tool-output reduction across agents, not net chat-session savings. Additional reads and model turns can offset reductions.</p>${projectLabelNoteHtml(events)}${operationMetricsHtml()}</body>`);
   const section = renderTranscriptSection(usage);
   return section === '' ? base : base.replace('</body>', `${section}\n</body>`);
