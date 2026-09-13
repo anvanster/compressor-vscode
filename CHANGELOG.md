@@ -47,9 +47,11 @@
   inline into that folder and hands the model the path; the file is this
   extension's own output coming back, so refusing it protected nothing and only
   drove the model to read the file uncompressed through the shell. Scoped to
-  that segment pair beneath VS Code's own per-user storage directory, with the
-  size, regular-file and binary checks still
-  applied; nothing else outside the workspace became readable.
+  that segment pair beneath VS Code's own per-user storage directory once that
+  directory is known, and to the segment pair alone before activation resolves
+  it or on layouts it cannot be derived from, with the size, regular-file and
+  binary checks still applied; nothing else outside the workspace became
+  readable.
 - `#compressorExecute` refuses a command whose only effect is to print a file
   (`cat`, `head`, `sed -n`, including inside a `bash -lc` wrapper) and names the
   `#compressorRead` call to use instead. Command output is summarized for
