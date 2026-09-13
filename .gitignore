@@ -1,7 +1,8 @@
-# Steering output the extension writes into whatever repo it is enabled in,
-# including this one. CI workflows under .github/ stay tracked.
-.github/agents/compressor.agent.md
-.github/prompts/compressor.prompt.md
+# Local settings, not shared: steering artifacts the extension writes into
+# whatever repo it is enabled in, including this one. CI workflows stay
+# trackable so they can be added without loosening this.
+.github/*
+!.github/workflows/
 docs/DEVELOPMENT-TESTING.md
 docs/IMPLEMENTATION-PLAN.md
 node_modules/
