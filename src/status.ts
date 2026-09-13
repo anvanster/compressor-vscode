@@ -56,6 +56,11 @@ export function relativeTime(thenMs: number, nowMs: number = Date.now()): string
 
 /** Location plus revision, naming the fix when what is on disk is stale. */
 function describeSteering(status: SteeringStatus, location: string): string {
+  if (status.state === 'foreign') {
+    return `a "compressor" agent exists at ${location} but this extension did not write it - ` +
+      'custom agents share one namespace, so "Compressor: Enable Copilot Steering" asks before ' +
+      'replacing it';
+  }
   if (status.state !== 'outdated') return `installed at ${location} (v${STEERING_REVISION})`;
   const stamped = status.revision === undefined ? 'written by an older build' : `v${status.revision}`;
   return `installed at ${location} but OUT OF DATE (${stamped}; this build writes ` +

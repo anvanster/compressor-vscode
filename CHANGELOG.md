@@ -62,8 +62,8 @@
   coverage marker means, to fetch the rest with the offset the marker names
   rather than substituting another tool, and that a symbol name is not evidence
   of behaviour. The structural fixes below make the output honest about its own
-  coverage; this is what makes a model act on it. Steering revision is now v2,
-  so existing installs report as out of date until re-run.
+  coverage; this is what makes a model act on it. Existing installs
+  report as out of date until re-run.
 - **Reads degrade by level of detail instead of cutting the content.** A
   truncated prefix loses either way: a weaker model describes the part it never
   received, and a stronger one notices the gap and re-reads the file by other

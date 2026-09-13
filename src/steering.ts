@@ -375,8 +375,12 @@ export async function removeSteering(projectDir: string): Promise<string[]> {
  * this extension wrote under an older revision, a hand-edited owned file, and a
  * missing instructions section alike: install rewrites all of them the same way,
  * so the useful question is simply whether the bytes already match.
+ *
+ * "foreign" is the one state install does NOT rewrite unasked: a file in the
+ * shared user agent namespace that carries no ownership marker belongs to
+ * somebody else, so it is neither ours to call stale nor ours to update.
  */
-export type SteeringState = 'absent' | 'current' | 'outdated';
+export type SteeringState = 'absent' | 'current' | 'outdated' | 'foreign';
 
 export interface SteeringStatus {
   state: SteeringState;
@@ -403,7 +407,9 @@ export async function steeringStatus(projectDir: string): Promise<SteeringStatus
 }
 
 export async function userSteeringStatus(home: string = os.homedir()): Promise<SteeringStatus> {
-  return statusFor(await readFileOrNull(userAgentPath(home)), USER_AGENT_CONTENT, () => true);
+  const agent = await readFileOrNull(userAgentPath(home));
+  if (agent !== null && !isOwned(agent)) return { state: 'foreign' };
+  return statusFor(agent, USER_AGENT_CONTENT, () => true);
 }
 
 /** Installed ⇨ the primary artifact (the custom agent) is present. */
@@ -451,6 +457,7 @@ export async function userSteeringInstalled(home: string = os.homedir()): Promis
 export function installOutcome(before: SteeringStatus, scope: SteeringScope): string {
   const what = scope === 'user' ? 'user-profile agent' : 'steering';
   if (before.state === 'absent') return `${what} installed`;
+  if (before.state === 'foreign') return `${what} installed over the agent that was there`;
   const from = before.revision === undefined ? 'an older build' : `v${before.revision}`;
   return `${what} updated from ${from} to v${STEERING_REVISION}`;
 }
@@ -461,8 +468,7 @@ export function installOutcome(before: SteeringStatus, scope: SteeringScope): st
  * somebody else's agent, so the command asks first.
  */
 export async function userAgentIsForeign(home: string = os.homedir()): Promise<boolean> {
-  const existing = await readFileOrNull(userAgentPath(home));
-  return existing !== null && !isOwned(existing);
+  return (await userSteeringStatus(home)).state === 'foreign';
 }
 
 function firstWorkspaceFolder(): string | undefined {

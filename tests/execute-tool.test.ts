@@ -219,6 +219,30 @@ it('names the redirect the way compressor_read resolves it, not the way the shel
   expect(compressorReadPath('/etc/hosts', root, [root])).toBeUndefined();
 });
 
+it('does not split a command on a separator inside quotes', async () => {
+  // the `;` is inside the string being echoed, so nothing here reads a file
+  for (const command of [
+    'echo "done; cat report.txt"',
+    "echo 'a && cat package.json'",
+    'echo "one" && echo "two; head -5 README.md"',
+  ]) {
+    expect(pureFileRead(command), command).toBeUndefined();
+  }
+  // an unbalanced quote leaves a filename no tool could open, so it is not named
+  expect(pureFileRead('cat "report.txt')).toBeUndefined();
+});
+
+it('names the offending part of a compound command, not the whole command', async () => {
+  const message = rejection(await runExecuteTool({ command: 'echo start && cat package.json' }, DEPS));
+  expect(message).toContain('One part of that command only prints a file');
+  expect(message).toContain('cat package.json');
+  expect(message).toContain('none of it ran');
+  expect(message).toContain('compressor_read package.json');
+
+  const whole = rejection(await runExecuteTool({ command: 'cat package.json' }, DEPS));
+  expect(whole).toContain('That command only prints a file');
+});
+
 it('names the file it wants read through the proper tool', () => {
   expect(pureFileRead("sed -n '1,240p' package.json")).toBe('package.json');
   expect(pureFileRead('cat src/tools/read.ts')).toBe('src/tools/read.ts');

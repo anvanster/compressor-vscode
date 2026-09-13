@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { isChatSessionResource, containsPath, readWorkspaceFile } from '../src/tools/workspace-file';
+import { isChatSessionResource, containsPath, readWorkspaceFile, setChatResourceRoot } from '../src/tools/workspace-file';
 
 it('rejects symlinks outside the workspace but permits internal targets', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'compressor-boundary-'));
@@ -30,6 +30,23 @@ describe('spilled tool results', () => {
 
   it('recognises VS Code spill paths on every platform layout', () => {
     for (const file of spill) expect(isChatSessionResource(file), file).toBe(true);
+  });
+
+  it('stays inside the storage area the extension host named', async () => {
+    const user = path.join(os.tmpdir(), 'compressor-user-storage');
+    try {
+      await setChatResourceRoot(user);
+      const inside = path.join(
+        user, 'workspaceStorage', 'abc', 'GitHub.copilot-chat', 'chat-session-resources', 's1', 'content.txt',
+      );
+      expect(isChatSessionResource(inside)).toBe(true);
+      // the same segment pair anywhere else is not VS Code's spill folder
+      expect(isChatSessionResource(
+        path.join(os.tmpdir(), 'elsewhere', 'GitHub.copilot-chat', 'chat-session-resources', 'content.txt'),
+      )).toBe(false);
+    } finally {
+      await setChatResourceRoot(undefined);
+    }
   });
 
   it('does not open the rest of the machine', () => {

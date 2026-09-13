@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import path from 'node:path';
 import { createLedgerSource } from './ledger-source';
 import { setProjectResolver } from './ledger';
 import { createProjectResolver } from './project-resolver';
@@ -20,6 +21,7 @@ import { registerManageCommands } from './manage';
 import { ModeStatusItem, registerSelectModeCommand } from './mode-status';
 import { registerCountCommand } from './count-tokens';
 import { registerCompressSelectionCommand } from './compress-preview';
+import { setChatResourceRoot } from './tools/workspace-file';
 
 // P2 MVP: savings ticker + report webview + status command.
 // P3: compressor_read languageModelTools tool + Copilot steering file.
@@ -31,6 +33,12 @@ import { registerCompressSelectionCommand } from './compress-preview';
 // compressor_read tool is invoked — workspace files.
 
 export function activate(context: vscode.ExtensionContext): void {
+  // globalStorageUri is `<...>/User/globalStorage/<extension id>`, so its
+  // grandparent is the `User` directory that also holds the
+  // `workspaceStorage/<hash>/` trees Copilot spills tool results into. Reading
+  // a spilled result is the one exception to the workspace boundary, so it is
+  // anchored to that directory rather than to the segment names alone.
+  void setChatResourceRoot(path.dirname(path.dirname(context.globalStorageUri.fsPath)));
   // Labelling comes from the library, so this extension and the CLI hooks
   // cannot drift: one key (~/.compressor/project-salt), one algorithm. The key
   // is never written to the ledger, so a shared report cannot be tested against

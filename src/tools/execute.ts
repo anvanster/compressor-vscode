@@ -111,8 +111,42 @@ const SHELL_WRAPPER = /^\s*(?:\/usr\/bin\/env\s+)?(?:ba|z|da)?sh\s+(?:-[a-z]+\s+
 const PAGER = /^(?:cat|head|tail|nl|bat|more|less)\b(?:\s+-{1,2}[\w-]+(?:[= ]\d+)?)*\s+(\S+)$/;
 const SED_RANGE = /^sed\s+-n\s+['"]?\d+(?:,\d+)?p['"]?\s+(\S+)$/;
 
-// `||` is listed before any bare `|` so a pipe is never mistaken for a separator.
-const SEGMENT_SPLIT = /[;\n]|&&|\|\|/;
+/**
+ * Split on `;`, a newline, `&&` and `||`, but only outside quotes: a separator
+ * inside a quoted argument is data, so `echo "done; cat report.txt"` is one
+ * command that prints a string, not two of which the second reads a file. A
+ * bare `|` is never a separator here - a segment that still contains one is a
+ * pipeline, which the caller skips.
+ */
+function segments(text: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: string | undefined;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index] as string;
+    if (char === '\\' && quote !== "'" && index + 1 < text.length) {
+      current += char + text[index + 1];
+      index += 1;
+    } else if (quote !== undefined) {
+      current += char;
+      if (char === quote) quote = undefined;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+    } else if (char === ';' || char === '\n') {
+      parts.push(current);
+      current = '';
+    } else if ((char === '&' || char === '|') && text[index + 1] === char) {
+      parts.push(current);
+      current = '';
+      index += 1;
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
 
 /**
  * Command output is summarized for diagnostics: a 240-line file read this way
@@ -122,17 +156,30 @@ const SEGMENT_SPLIT = /[;\n]|&&|\|\|/;
  * letting the shell become an uncompressed, lossy read path.
  */
 export function pureFileRead(command: string): string | undefined {
+  return fileReadSegment(command)?.file;
+}
+
+/**
+ * The file a part of the command merely prints, and the part that prints it.
+ * `whole` distinguishes a command that does nothing else from a compound one
+ * whose other parts are real work: refusing both is right (running the rest
+ * would leave the read unserved), but only the first can be described as a
+ * command that only prints a file.
+ */
+export function fileReadSegment(
+  command: string,
+): { file: string; segment: string; whole: boolean } | undefined {
   let text = command.trim();
   const wrapped = SHELL_WRAPPER.exec(text);
   if (wrapped?.[2] !== undefined) text = wrapped[2].trim();
   // A compound command is still a file read if any part of it is one. Observed
   // in the wild: `printf ...; cat package.json; printf ...; sed -n '1,200p'
-  // README.md` — two whole files, read raw, between two harmless printfs.
-  for (const segment of text.split(SEGMENT_SPLIT)) {
-    const part = segment.trim();
+  // README.md` - two whole files, read raw, between two harmless printfs.
+  const parts = segments(text).map((segment) => segment.trim()).filter((segment) => segment !== '');
+  for (const part of parts) {
     // piped, redirected or substituted: the text is being processed, which is
     // what a shell is for. `tail -f` is a follow, not a read.
-    if (part === '' || /[|><]|\$\(|`/.test(part) || /\s-{1,2}(?:f\b|-follow\b)/.test(part)) {
+    if (/[|><]|\$\(|`/.test(part) || /\s-{1,2}(?:f\b|-follow\b)/.test(part)) {
       continue;
     }
     // `tail` asks for the END of a file, and compressor_read counts
@@ -140,8 +187,14 @@ export function pureFileRead(command: string): string | undefined {
     // 50 server.log` would name a tool that cannot answer the question. Only
     // the `tail -n +N` form (start AT line N) is a top-counted read.
     if (/^tail\b/.test(part) && !/\s\+\d+\b/.test(part)) continue;
-    const file = (PAGER.exec(part) ?? SED_RANGE.exec(part))?.[1];
-    if (file !== undefined) return unquote(file);
+    const matched = (PAGER.exec(part) ?? SED_RANGE.exec(part))?.[1];
+    if (matched === undefined) continue;
+    const file = unquote(matched);
+    // A quote left inside the filename means the parse is wrong or the shell
+    // would expand it away; naming such a path would send the model after a
+    // file that cannot exist.
+    if (/['"]/.test(file)) continue;
+    return { file, segment: part, whole: parts.length === 1 };
   }
   return undefined;
 }
@@ -184,15 +237,24 @@ export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Pr
   if (!input.command?.trim()) return reject('A command is required.');
   const root = deps.workspaceFolders[0];
   if (!root) return reject('Open a workspace before running commands.');
-  const matched = pureFileRead(input.command);
+  const matched = fileReadSegment(input.command);
   const readInstead = matched === undefined
     ? undefined
-    : compressorReadPath(matched, path.resolve(root, input.cwd ?? '.'), deps.workspaceFolders);
-  if (readInstead !== undefined) {
+    : compressorReadPath(matched.file, path.resolve(root, input.cwd ?? '.'), deps.workspaceFolders);
+  if (readInstead !== undefined && matched !== undefined) {
+    // A compound command is refused whole - running the rest would still leave
+    // the read unserved - so the message says which part is the problem and
+    // that nothing ran, instead of describing the whole command as a read.
+    const what = matched.whole
+      ? 'That command only prints a file.'
+      : `One part of that command only prints a file (\`${matched.segment}\`), so none of it ran.`;
+    const next = matched.whole
+      ? `Use compressor_read ${readInstead} (add offset/limit for a range)`
+      : `Re-run the command without that part, and use compressor_read ${readInstead} for the file`;
     return reject(
-      `That command only prints a file. Command output is summarized for diagnostics, so reading ` +
-      `${readInstead} this way returns a sample of it, not the file. Use compressor_read ${readInstead} ` +
-      '(add offset/limit for a range) — it returns what you asked for and states its own coverage.',
+      `${what} Command output is summarized for diagnostics, so reading ` +
+      `${readInstead} this way returns a sample of it, not the file. ${next} - ` +
+      'it returns what you asked for and states its own coverage.',
     );
   }
   if (deps.signal?.aborted) return reject('Command cancelled before execution.');

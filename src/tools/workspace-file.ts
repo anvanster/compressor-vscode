@@ -13,12 +13,35 @@ import path from 'node:path';
  *
  * Deliberately narrow: the path must contain VS Code's own
  * `GitHub.copilot-chat/chat-session-resources` segment pair, which no workspace
- * file has. Size, regular-file and binary checks still apply.
+ * file has, AND lie under VS Code's per-user storage area once that is known.
+ * Size, regular-file and binary checks still apply.
  */
 const SESSION_RESOURCE = /(?:^|[\\/])GitHub\.copilot-chat[\\/]chat-session-resources[\\/]/;
 
+/**
+ * VS Code's `User` directory, holding both `globalStorage/` and the
+ * `workspaceStorage/<hash>/` trees Copilot spills tool results into. Supplied
+ * by the extension host at activation; until then the segment pair alone
+ * decides, so a spilled result is never refused because of startup ordering.
+ * Both the raw and the symlink-resolved form are kept, since the caller may
+ * hand over either.
+ */
+let storageRoots: readonly string[] = [];
+
+export async function setChatResourceRoot(dir: string | undefined): Promise<void> {
+  if (dir === undefined) {
+    storageRoots = [];
+    return;
+  }
+  const raw = path.resolve(dir);
+  const resolved = await realpath(raw).catch(() => raw);
+  storageRoots = raw === resolved ? [raw] : [raw, resolved];
+}
+
 export function isChatSessionResource(target: string): boolean {
-  return SESSION_RESOURCE.test(target);
+  if (!SESSION_RESOURCE.test(target)) return false;
+  if (storageRoots.length === 0) return true;
+  return storageRoots.some((root) => containsPath(root, path.resolve(target)));
 }
 
 export function containsPath(root: string, target: string): boolean {

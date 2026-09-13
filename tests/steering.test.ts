@@ -261,6 +261,11 @@ describe('user-profile steering (~/.copilot/agents)', () => {
     await mkdir(userAgentDir(home), { recursive: true });
     await writeFile(userAgentPath(home), '---\nname: compressor\n---\nsomeone else\n', 'utf8');
     expect(await userAgentIsForeign(home)).toBe(true);
+    // not ours, so not "an older build of ours": calling it outdated would put a
+    // permanent stale badge on the ticker and advise overwriting it
+    expect(await userSteeringStatus(home)).toEqual({ state: 'foreign' });
+    expect(installOutcome({ state: 'foreign' }, 'user'))
+      .toBe('user-profile agent installed over the agent that was there');
 
     await installUserSteering(home);
     expect(await userAgentIsForeign(home)).toBe(false);
@@ -390,6 +395,20 @@ describe('status integration', () => {
     const report = await buildStatusReport({ projectDir, homeDir, source: createLedgerSource(ledgerDir) });
     expect(report).toContain(`OUT OF DATE (v0; this build writes v${STEERING_REVISION})`);
     expect(report).toContain('re-run "Compressor: Enable Copilot Steering" to update');
+  });
+
+  it("does not call somebody else's user agent out of date", async () => {
+    const [ledgerDir, projectDir, homeDir] = await Promise.all([
+      tempDir('compressor-vscode-steering-ledger-'),
+      tempDir('compressor-vscode-steering-project-'),
+      tempDir('compressor-vscode-steering-home-'),
+    ]);
+    await mkdir(userAgentDir(homeDir), { recursive: true });
+    await writeFile(userAgentPath(homeDir), '---\nname: compressor\n---\nsomeone else\n', 'utf8');
+
+    const report = await buildStatusReport({ projectDir, homeDir, source: createLedgerSource(ledgerDir) });
+    expect(report).toContain('this extension did not write it');
+    expect(report).not.toContain('OUT OF DATE');
   });
 
   it('reports user-profile steering with no workspace folder open', async () => {
