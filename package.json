@@ -132,7 +132,7 @@
                 "toolReferenceName": "compressorExecute",
                 "displayName": "Run Command With Compressed Log",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Run a noninteractive shell command in a trusted workspace after confirmation. Returns exit status, a diagnostic summary and a retained log ID. Use for tests and builds. Commands can modify files or access the network. Stops on timeout or 2 MB output limit, marking output partial. Retrieve omitted output with compressor_log.",
+                "modelDescription": "Run a noninteractive shell command in a trusted workspace after confirmation. Returns exit status, a diagnostic summary and a retained log ID. Use for tests and builds. A command whose only effect is printing a workspace file (cat, head, nl, a sed -n range, including inside a bash -lc wrapper or one segment of a compound command) is refused and the reply names the path to read with compressor_read instead, because a diagnostic summary of a file returns a sample of it, not the file. Commands can modify files or access the network. Stops on timeout or 2 MB output limit, marking output partial. Retrieve omitted output with compressor_log.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

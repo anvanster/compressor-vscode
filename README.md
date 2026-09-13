@@ -35,7 +35,10 @@ does not upload workspace content itself; approved commands can access the netwo
     with `#compressorRead` using a qualified symbol or line range.
   - **`#compressorExecute`** — confirmed noninteractive commands with exit status,
     time/output limits, summaries and a retained log ID. The **Compressor Commands**
-    Output channel shows captured output. Commands are not sandboxed.
+    Output channel shows captured output. Commands are not sandboxed. A command
+    whose only effect is printing a workspace file is refused and the reply names
+    the path to read with `#compressorRead` instead; see the
+    [usage guide](docs/USAGE.md) for the exact rule.
   - **`#compressorLog`** — retrieve retained output without rerunning commands.
     Logs last up to 30 minutes and the last five commands in window memory;
     reload clears them. Capture is capped at 2 MB and marked partial if exceeded.
