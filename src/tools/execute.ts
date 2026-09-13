@@ -152,16 +152,30 @@ function unquote(file: string): string {
 }
 
 /**
- * Only redirect a path compressor_read can actually serve: it reads inside the
- * open workspace folders and refuses anything else, so rejecting `cat
- * /etc/hosts` in its favour is a dead end that costs the model two turns. A
- * shell-expanded home or variable path (`~/.npmrc`, `$HOME/...`) cannot be
- * resolved here and is not a workspace path either.
+ * The path to name in a redirect, or undefined when compressor_read cannot
+ * serve it: it reads inside the open workspace folders and refuses anything
+ * else, so rejecting `cat /etc/hosts` in its favour is a dead end that costs
+ * the model two turns. A shell-expanded home or variable path (`~/.npmrc`,
+ * `$HOME/...`) cannot be resolved here and is not a workspace path either.
+ *
+ * The two tools resolve relative paths differently — a shell command against
+ * its own cwd, compressor_read against the first workspace folder — so the
+ * command's own spelling is re-expressed the way compressor_read reads it.
+ * Naming it verbatim would send `cat config.json` run in `packages/app` to a
+ * compressor_read that looks in the workspace root and misses.
  */
-export function readableByCompressor(file: string, cwd: string, folders: readonly string[]): boolean {
-  if (folders.length === 0 || file.startsWith('~') || file.includes('$')) return false;
+export function compressorReadPath(
+  file: string,
+  cwd: string,
+  folders: readonly string[],
+): string | undefined {
+  const first = folders[0];
+  if (first === undefined || file.startsWith('~') || file.includes('$')) return undefined;
   const candidate = path.isAbsolute(file) ? path.normalize(file) : path.normalize(path.resolve(cwd, file));
-  return folders.some((folder) => path.relative(folder, candidate) !== '' && containsPath(folder, candidate));
+  const within = (folder: string): boolean =>
+    path.relative(folder, candidate) !== '' && containsPath(folder, candidate);
+  if (!folders.some(within)) return undefined;
+  return within(first) ? path.relative(first, candidate) : candidate;
 }
 
 export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Promise<ExecuteOutcome> {
@@ -170,9 +184,11 @@ export async function runExecuteTool(input: ExecuteInput, deps: ExecuteDeps): Pr
   if (!input.command?.trim()) return reject('A command is required.');
   const root = deps.workspaceFolders[0];
   if (!root) return reject('Open a workspace before running commands.');
-  const readInstead = pureFileRead(input.command);
-  if (readInstead !== undefined
-      && readableByCompressor(readInstead, path.resolve(root, input.cwd ?? '.'), deps.workspaceFolders)) {
+  const matched = pureFileRead(input.command);
+  const readInstead = matched === undefined
+    ? undefined
+    : compressorReadPath(matched, path.resolve(root, input.cwd ?? '.'), deps.workspaceFolders);
+  if (readInstead !== undefined) {
     return reject(
       `That command only prints a file. Command output is summarized for diagnostics, so reading ` +
       `${readInstead} this way returns a sample of it, not the file. Use compressor_read ${readInstead} ` +

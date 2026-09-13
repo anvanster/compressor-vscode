@@ -1,7 +1,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
-import { clearCommandLogs, commandReport, pureFileRead, retrieveLog, runExecuteTool, summarizeLog, finalizeExecution } from '../src/tools/execute';
+import { clearCommandLogs, commandReport, compressorReadPath, pureFileRead, retrieveLog, runExecuteTool, summarizeLog, finalizeExecution } from '../src/tools/execute';
 import type { ExecuteOutcome, ExecuteRan } from '../src/tools/execute';
 import type { LedgerEvent } from '@astudioplus/compressor';
 import { tempDir } from './fixtures';
@@ -199,6 +199,24 @@ it('does not redirect reads compressor_read cannot serve', async () => {
     const outcome = await runExecuteTool({ command, timeoutSeconds: 10 }, DEPS);
     expect(outcome.ran, command).toBe(true);
   }
+});
+
+it('names the redirect the way compressor_read resolves it, not the way the shell did', async () => {
+  // compressor_read resolves a relative path against the first workspace
+  // folder; the command resolved it against its own cwd
+  const outcome = await runExecuteTool({ command: 'cat read.ts', cwd: 'src/tools' }, DEPS);
+  const message = rejection(outcome);
+  expect(message).toContain(path.join('src', 'tools', 'read.ts'));
+  expect(message).not.toMatch(/compressor_read read\.ts\b/);
+
+  const root = process.cwd();
+  expect(compressorReadPath('config.json', path.join(root, 'packages/app'), [root]))
+    .toBe(path.join('packages', 'app', 'config.json'));
+  // an absolute path under a non-first folder cannot be named relative to the
+  // first one, so it is named absolutely
+  expect(compressorReadPath(path.join('/other/root', 'a.txt'), root, [root, '/other/root']))
+    .toBe(path.normalize('/other/root/a.txt'));
+  expect(compressorReadPath('/etc/hosts', root, [root])).toBeUndefined();
 });
 
 it('names the file it wants read through the proper tool', () => {
