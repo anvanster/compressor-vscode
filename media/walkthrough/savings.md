@@ -13,8 +13,7 @@ report (**Compressor: Show Savings**) to see:
 - **Totals** — recorded character reduction, estimated token reduction, and event
   count for the window.
 - **Two-tone bars** — the full bar is the total original tokens; the bright
-  part is output reduction — broken down by day, agent, tool, mode and
-  project.
+  part is output reduction — broken down by day, agent, tool, mode and project.
   The **by agent** view separates Copilot (VS Code) from Claude Code and the
   other surfaces sharing the ledger. Hover any bar for the exact character
   breakdown.

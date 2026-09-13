@@ -204,15 +204,16 @@ Review the command and working directory at confirmation: workspace validation
 is not a process sandbox. `timeoutSeconds` defaults to 120 and accepts 1-600.
 
 A command whose only effect is printing a file `compressor_read` can serve
-(`cat`, `head`, `nl`, `sed -n '1,200p'`, also inside a `bash -lc` wrapper or one
-segment of a compound command) is refused, and the reply names the path to read
-instead: command output is summarized for diagnostics, so reading a file that way
-returns a sample of it, not the file. A compound command is refused whole -
-nothing runs - and the reply names the offending segment, so drop that segment
-and re-run the rest. A separator inside quotes or a command substitution is
-part of that word or nested command, not a segment boundary. Everything else still runs, including a
-pipe, a redirect, a follow (`tail -f`), a `tail` of the end of a file, and any
-path `compressor_read` cannot serve.
+(`cat`, `head`, `nl`, `sed -n '1,200p'` and other pagers, also inside a
+`bash -lc` wrapper or one segment of a compound command) is refused, and the
+reply names the path to read instead: command output is summarized for
+diagnostics, so reading a file that way returns a sample of it, not the file.
+A compound command is refused whole - nothing runs - and the reply names the
+offending segment, so drop that segment and re-run the rest. A separator inside
+quotes or a command substitution is part of that word or nested command, not a
+segment boundary. Everything else still runs, including a pipe, a redirect, a
+follow (`tail -f`), a `tail` of the end of a file, and any path
+`compressor_read` cannot serve.
 
 ```text
 Use #compressorExecute to run
