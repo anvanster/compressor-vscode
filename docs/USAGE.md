@@ -92,6 +92,18 @@ preserved; repeated log lines may collapse into a marker with an exact
 mean the response actually shrank. Whole-file reads can honor a host budget;
 explicit ranges and symbol reads remain exact.
 
+Outside `full` mode, whole-file reads of `.json`/`.jsonc` drop leading
+indentation. Values come back byte-exact and line numbers are unchanged; no
+other language is dedented, because indentation there can be syntax or string
+data.
+
+When a whole file does not fit the host's budget, the reply degrades in detail
+rather than in coverage: if a symbol provider can describe the file, you get the
+**complete** list of its declarations (no bodies, nothing dropped to fit), and
+the next step is one named range. Otherwise the trimmed output names the
+`offset` to continue from. A range that stops short of the end of the file is
+labeled with the lines shown out of the file's total.
+
 ### Find things with `#compressorSearch`
 
 To locate where something is defined or used without reading whole files, the
@@ -139,9 +151,11 @@ or use literal matching if it times out. Discovery is bounded and excludes
 generated/dependency directories; partial-scan warnings mean counts are not
 exhaustive.
 
-Host-budget trimming preserves complete match windows and gives a continuation
-based on represented matches. If no window fits, reduce context or use an exact
-read. Other compression markers may instead ask you to narrow the search.
+Results are bounded in whole matches, never cut mid-block: outside `full` mode a
+page is fitted to the host's budget, or to a built-in page budget when the host
+supplies none (`slim` about half of `optimized`). A bounded page re-renders the
+matches that fit, each keeping its file and line, and ends with the `skip=` value
+to continue from. If no complete match fits, reduce context or use an exact read.
 Follow the response's recovery guidance rather than advancing past omitted
 matches. Budgets are optional host hints, not a `compressorSearch` input.
 
@@ -191,15 +205,16 @@ and limit the marker gave, and show me those lines.
 ## 3. Commands and retained logs
 
 Use `#compressorExecute` for noninteractive tests/builds in a trusted workspace.
-Reads stay inside the open workspace folders, with one deliberate exception:
-files under VS Code's own `GitHub.copilot-chat/chat-session-resources` folder,
-where it spills a tool result that was too large to pass inline.
-That file is this extension's own output being handed back, and refusing it only
-drove the model to read the file uncompressed through the shell instead.
-No other path outside the workspace is readable.
-
 Review the command and working directory at confirmation: workspace validation
 is not a process sandbox. `timeoutSeconds` defaults to 120 and accepts 1-600.
+
+A command whose only effect is printing a file `compressor_read` can serve
+(`cat`, `head`, `nl`, `sed -n '1,200p'`, also inside a `bash -lc` wrapper or one
+segment of a compound command) is refused, and the reply names the path to read
+instead: command output is summarized for diagnostics, so reading a file that way
+returns a sample of it, not the file. Everything else still runs, including a
+pipe, a redirect, a follow (`tail -f`), a `tail` of the end of a file, and any
+path `compressor_read` cannot serve.
 
 ```text
 Use #compressorExecute to run
@@ -224,8 +239,10 @@ Logs are held in this window's memory for up to 30 minutes and the last five
 commands. Reloading clears them. Output capture stops at 2 MB, so a capped log
 is only the captured portion. Retrieval accepts `offset` >= 1, `limit` 1-500
 and optional `characterOffset` >= 0. Retrieving a log adds traffic; it is not
-recorded as savings. Linux cancellation is tested; Windows process-tree cleanup
-remains a limitation.
+recorded as savings. A cancelled or timed-out command is stopped as a whole
+tree - the detached process group on macOS/Linux, `taskkill /T` on Windows - so
+a process the shell started is not left running. The POSIX path is covered by
+tests; the Windows path is not exercised by the test suite.
 
 ## 4. Understand the report
 
@@ -233,9 +250,12 @@ remains a limitation.
   (or run **Compressor: Show Savings**) to open the report.
 - The report's bars are two-tone: the **full bar is the total original tokens**,
   the **bright segment is estimated output reduction**, broken down by day, agent,
-  tool, and mode. The **by agent** view separates Copilot (VS Code) from Claude
-  Code and any other surfaces sharing the ledger. Hover a bar for the exact
-  chars breakdown.
+  tool, mode, and project. The **by agent** view separates Copilot (VS Code) from
+  Claude Code and any other surfaces sharing the ledger; project labels follow
+  `compressor.projectLabel` (see **Settings**). Hover a bar for the exact chars
+  breakdown.
+- Steering older than the running build appears as a banner at the top of the
+  report and as a warning on the status-bar ticker, never as a notification.
 - Optionally (set `compressor.showActualUsage`, off by default), an **actual
   usage** section below the charts reports authoritative token counts from this
   project's Claude Code session transcripts — real usage, *not savings* and not
@@ -254,7 +274,7 @@ controlled task comparisons including follow-up reads and log retrieval.
 |---|---|
 | **Count Tokens** | Exact chars + estimated tokens for the active file or selection. |
 | **Preview Compression** | Side-by-side diff of the active file/selection vs. what `compressor_read` would return. No file writes. |
-| **Status** | Per-adapter install status, steering state, and ledger recency. |
+| **Status** | Per-adapter install status, steering state for the workspace and the user profile (flagging an out-of-date install), and ledger recency. |
 | **Init / Set Instruction-Pack Mode / Uninstall** | Install/switch/remove the compressor instruction packs for agents, with a confirmation diff. |
 | **Enable / Disable Copilot Steering** | Manage extension-owned agent/prompt files and the fenced instructions section; select a root in multi-root workspaces. |
 
@@ -269,9 +289,14 @@ does not simulate the model host's token budget or tokenizer.
   the agent uses Compressor tools. Built-in terminal commands bypass command
   summaries and their reduction records.
 - Read/outline access is confined to canonical workspace paths and regular text
-  files up to 8 MB. Search reads discovered files in the selected scope and
-  applies additional file/size caps. Approved commands can access resources
-  outside that scope; do not treat them as confined file reads.
+  files up to 8 MB, with one deliberate exception: `compressor_read` also reads
+  files under VS Code's own `GitHub.copilot-chat/chat-session-resources` folder,
+  where it spills a tool result too large to pass inline. That file is this
+  extension's own output handed back, and refusing it only drove the model to
+  read it uncompressed through the shell. No other path outside the workspace is
+  readable. Search reads discovered files in the selected scope and applies
+  additional file/size caps. Approved commands can access resources outside that
+  scope; do not treat them as confined file reads.
 - Instruction packs reach Copilot through `.github/copilot-instructions.md` /
   `AGENTS.md` — see the [compressor docs](https://github.com/anvanster/compressor).
 
