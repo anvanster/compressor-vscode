@@ -1,9 +1,10 @@
 # Tune and inspect
 
-- **Mode** — the status-bar `compressor: <mode>` item switches the read tool
-  between `optimized` (preserve source, dedupe logs), `slim` (preserve source,
-  compact search), and `full` (uncompressed reads/search). Explicit outline and
-  command-summary tools still summarize.
+- **Mode** — the status-bar `compressor: <mode>` item switches the read/search
+  output policy between `optimized` (preserve source, dedupe logs), `slim`
+  (preserve source, bound search results about twice as tightly), and `full`
+  (uncompressed reads/search). Explicit outline and command-summary tools still
+  summarize.
 - **Count Tokens** — exact chars and an estimated token count for the active
   file or selection.
 - **Preview Compression** — a side-by-side diff of what `compressor_read` would

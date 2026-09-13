@@ -3,7 +3,14 @@ import os from 'node:os';
 import { adapters } from '@astudioplus/compressor';
 import type { AdapterContext } from '@astudioplus/compressor';
 import type { LedgerSource } from './ledger-source';
-import { STEERING_PRIMARY_RELATIVE_PATH, steeringInstalled } from './steering';
+import {
+  STEERING_PRIMARY_RELATIVE_PATH,
+  STEERING_REVISION,
+  steeringStatus,
+  userAgentPath,
+  userSteeringStatus,
+} from './steering';
+import type { SteeringStatus } from './steering';
 
 // "Compressor: Status" — per-adapter install status for the first workspace
 // folder plus ledger recency, ending with the honesty line. Read-only: the
@@ -47,6 +54,19 @@ export function relativeTime(thenMs: number, nowMs: number = Date.now()): string
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** Location plus revision, naming the fix when what is on disk is stale. */
+function describeSteering(status: SteeringStatus, location: string): string {
+  if (status.state === 'foreign') {
+    return `a "compressor" agent exists at ${location} but this extension did not write it - ` +
+      'custom agents share one namespace, so "Compressor: Enable Copilot Steering" asks before ' +
+      'replacing it';
+  }
+  if (status.state !== 'outdated') return `installed at ${location} (v${STEERING_REVISION})`;
+  const stamped = status.revision === undefined ? 'written by an older build' : `v${status.revision}`;
+  return `installed at ${location} but OUT OF DATE (${stamped}; this build writes ` +
+    `v${STEERING_REVISION}) — re-run "Compressor: Enable Copilot Steering" to update`;
+}
+
 export interface StatusInput {
   /** first workspace folder, or undefined when no folder is open */
   projectDir: string | undefined;
@@ -57,6 +77,7 @@ export interface StatusInput {
 /** Pure-ish report assembly (reads config files via adapters), for tests. */
 export async function buildStatusReport(input: StatusInput): Promise<string> {
   const lines: string[] = ['compressor status', ''];
+  let workspaceSteering: SteeringStatus | undefined;
 
   if (input.projectDir === undefined) {
     lines.push('no workspace folder open — adapter status unavailable');
@@ -76,16 +97,44 @@ export async function buildStatusReport(input: StatusInput): Promise<string> {
         lines.push(`${adapter.name}: status unavailable (${String(error)})`);
       }
     }
-    const steering = await steeringInstalled(input.projectDir);
+    const steering = await steeringStatus(input.projectDir);
+    workspaceSteering = steering;
     lines.push(
       `copilot steering (compressor agent + /compressor): ${
-        steering
-          ? `installed (${STEERING_PRIMARY_RELATIVE_PATH}) — pick the "compressor" ` +
-            'agent from the Chat agents dropdown; spot-check Configure Tools shows no built-in read'
-          : 'not installed — run "Compressor: Enable Copilot Steering"'
+        steering.state === 'absent'
+          ? 'not installed — run "Compressor: Enable Copilot Steering"'
+          : describeSteering(steering, STEERING_PRIMARY_RELATIVE_PATH)
       }`,
     );
+    // Usage advice only once it is current: a stale install needs updating first.
+    if (steering.state === 'current') {
+      lines.push(
+        '  pick the "compressor" agent from the Chat agents dropdown; spot-check ' +
+          'Configure Tools shows no built-in read',
+      );
+    }
     lines.push('', MATCH_NOTE);
+  }
+
+  // User scope is meaningful with no folder open, so it is reported either way.
+  const userSteering = await userSteeringStatus(input.homeDir);
+  lines.push(
+    '',
+    `copilot steering (user profile): ${
+      userSteering.state === 'absent'
+        ? 'not installed — run "Compressor: Enable Copilot Steering" and pick "All workspaces"'
+        : describeSteering(userSteering, userAgentPath(input.homeDir))
+    }`,
+  );
+  if (userSteering.state === 'current') {
+    lines.push('  the "compressor" agent is offered in every workspace');
+  }
+  if (userSteering.state !== 'absent' && workspaceSteering !== undefined
+      && workspaceSteering.state !== 'absent') {
+    lines.push(
+      'note: this workspace and your user profile both define a "compressor" agent; ' +
+        'VS Code does not document which wins, so remove one if the dropdown looks wrong.',
+    );
   }
 
   lines.push('');

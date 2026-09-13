@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_CONTENT,
+  USER_AGENT_CONTENT,
   AGENT_RELATIVE_PATH,
   COPILOT_INSTRUCTIONS_RELATIVE_PATH,
   OWNED_ARTIFACTS,
@@ -19,8 +20,20 @@ import {
   promptPath,
   removeSteering,
   removeSteeringSection,
+  STEERING_REVISION,
+  installOutcome,
+  ownedRevision,
   steeringInstalled,
+  steeringStatus,
   upsertSteeringSection,
+  userSteeringStatus,
+  installUserSteering,
+  isOwned,
+  removeUserSteering,
+  userAgentDir,
+  userAgentIsForeign,
+  userAgentPath,
+  userSteeringInstalled,
 } from '../src/steering';
 import { buildStatusReport } from '../src/status';
 import { createLedgerSource } from '../src/ledger-source';
@@ -185,6 +198,149 @@ describe('install/remove round-trip', () => {
   });
 });
 
+describe('user-profile steering (~/.copilot/agents)', () => {
+  it('shares the workspace tools allowlist but drops workspace-specific wording', () => {
+    const tools = /^tools: (.+)$/m;
+    expect(tools.exec(USER_AGENT_CONTENT)?.[1]).toBe(tools.exec(AGENT_CONTENT)?.[1]);
+    // custom agents have no namespace, so identity must not rest on the filename
+    expect(USER_AGENT_CONTENT).toContain('name: compressor');
+    expect(AGENT_CONTENT).toContain('name: compressor');
+    expect(isOwned(USER_AGENT_CONTENT)).toBe(true);
+    // an agent offered in every workspace must not claim to be about one repo
+    expect(USER_AGENT_CONTENT).not.toContain('this workspace');
+    expect(USER_AGENT_CONTENT).not.toContain('this repo');
+    expect(AGENT_CONTENT).toContain('this workspace');
+  });
+
+  it('installs and removes the agent, pruning only a folder it emptied', async () => {
+    const home = await tempDir('compressor-vscode-steering-userhome-');
+    expect(await userSteeringInstalled(home)).toBe(false);
+
+    const touched = await installUserSteering(home);
+    expect(touched).toEqual([path.join(home, '.copilot', 'agents', 'compressor.agent.md')]);
+    expect(await readFile(userAgentPath(home), 'utf8')).toBe(USER_AGENT_CONTENT);
+    expect(await userSteeringInstalled(home)).toBe(true);
+
+    await removeUserSteering(home);
+    expect(await userSteeringInstalled(home)).toBe(false);
+    expect(await exists(userAgentDir(home))).toBe(false);
+  });
+
+  it("keeps the agents folder when somebody else's agent lives there", async () => {
+    const home = await tempDir('compressor-vscode-steering-userhome-');
+    await installUserSteering(home);
+    const neighbour = path.join(userAgentDir(home), 'reviewer.agent.md');
+    await writeFile(neighbour, 'not ours', 'utf8');
+
+    await removeUserSteering(home);
+    expect(await exists(userAgentPath(home))).toBe(false);
+    expect(await readFile(neighbour, 'utf8')).toBe('not ours');
+  });
+
+  it("leaves somebody else's compressor agent in place on remove", async () => {
+    // custom agents share one namespace, so a `compressor` agent in the user
+    // profile is not necessarily ours to delete
+    const home = await tempDir('compressor-vscode-steering-userhome-');
+    const foreign = '---\nname: compressor\n---\nsomeone else\n';
+    await mkdir(userAgentDir(home), { recursive: true });
+    await writeFile(userAgentPath(home), foreign, 'utf8');
+
+    expect(await removeUserSteering(home)).toEqual([]);
+    expect(await readFile(userAgentPath(home), 'utf8')).toBe(foreign);
+
+    // the command path deletes it only after the user has confirmed
+    expect(await removeUserSteering(home, { force: true }))
+      .toEqual([userAgentPath(home)]);
+    expect(await exists(userAgentPath(home))).toBe(false);
+  });
+
+  it('detects a foreign compressor agent so an install cannot silently replace it', async () => {
+    const home = await tempDir('compressor-vscode-steering-userhome-');
+    expect(await userAgentIsForeign(home)).toBe(false); // absent is not foreign
+
+    await mkdir(userAgentDir(home), { recursive: true });
+    await writeFile(userAgentPath(home), '---\nname: compressor\n---\nsomeone else\n', 'utf8');
+    expect(await userAgentIsForeign(home)).toBe(true);
+    // not ours, so not "an older build of ours": calling it outdated would put a
+    // permanent stale badge on the ticker and advise overwriting it
+    expect(await userSteeringStatus(home)).toEqual({ state: 'foreign' });
+    expect(installOutcome({ state: 'foreign' }, 'user'))
+      .toBe('user-profile agent installed over the agent that was there');
+
+    await installUserSteering(home);
+    expect(await userAgentIsForeign(home)).toBe(false);
+  });
+});
+
+describe('revision tracking (older installs must be updatable)', () => {
+  it('stamps a revision that survives reading back', () => {
+    expect(ownedRevision(AGENT_CONTENT)).toBe(STEERING_REVISION);
+    expect(ownedRevision(USER_AGENT_CONTENT)).toBe(STEERING_REVISION);
+    expect(ownedRevision('no marker here')).toBeUndefined();
+  });
+
+  it('treats a file stamped by an older revision as ours, and as outdated', async () => {
+    const projectDir = await tempDir('compressor-vscode-steering-rev-');
+    await installSteering(projectDir);
+    expect(await steeringStatus(projectDir)).toEqual({ state: 'current', revision: STEERING_REVISION });
+
+    // simulate what an earlier extension version left behind
+    const older = AGENT_CONTENT
+      .replace(`v=${STEERING_REVISION} -->`, 'v=0 -->')
+      .replace(/^tools: .*$/m, "tools: ['compressorRead', 'edit']");
+    await writeFile(agentPath(projectDir), older, 'utf8');
+
+    const stale = await steeringStatus(projectDir);
+    expect(stale).toEqual({ state: 'outdated', revision: 0 });
+    expect(isOwned(older)).toBe(true); // still ours, so it is safe to replace
+    expect(installOutcome(stale, 'workspace')).toBe(`steering updated from v0 to v${STEERING_REVISION}`);
+
+    await installSteering(projectDir);
+    expect(await readFile(agentPath(projectDir), 'utf8')).toBe(AGENT_CONTENT);
+    expect((await steeringStatus(projectDir)).state).toBe('current');
+  });
+
+  it('reports a pre-stamp install as outdated without inventing a revision', async () => {
+    const projectDir = await tempDir('compressor-vscode-steering-rev-');
+    await installSteering(projectDir);
+    await writeFile(agentPath(projectDir), '---\nname: compressor\n---\nancient\n', 'utf8');
+
+    const stale = await steeringStatus(projectDir);
+    expect(stale).toEqual({ state: 'outdated' });
+    expect(installOutcome(stale, 'workspace')).toBe(`steering updated from an older build to v${STEERING_REVISION}`);
+    expect(installOutcome({ state: 'absent' }, 'user')).toBe('user-profile agent installed');
+  });
+
+  it('notices a stale prompt or a stripped instructions section, not just the agent', async () => {
+    const projectDir = await tempDir('compressor-vscode-steering-rev-');
+    await installSteering(projectDir);
+
+    await writeFile(promptPath(projectDir), 'stale prompt\n', 'utf8');
+    expect((await steeringStatus(projectDir)).state).toBe('outdated');
+
+    await installSteering(projectDir);
+    await writeFile(copilotInstructionsPath(projectDir), '# just my own notes\n', 'utf8');
+    expect((await steeringStatus(projectDir)).state).toBe('outdated');
+
+    await installSteering(projectDir);
+    expect((await steeringStatus(projectDir)).state).toBe('current');
+  });
+
+  it('tracks the user-scope agent revision independently', async () => {
+    const home = await tempDir('compressor-vscode-steering-userrev-');
+    expect(await userSteeringStatus(home)).toEqual({ state: 'absent' });
+
+    await installUserSteering(home);
+    expect(await userSteeringStatus(home)).toEqual({ state: 'current', revision: STEERING_REVISION });
+
+    await writeFile(userAgentPath(home), USER_AGENT_CONTENT.replace(`v=${STEERING_REVISION} -->`, 'v=0 -->'), 'utf8');
+    expect(await userSteeringStatus(home)).toEqual({ state: 'outdated', revision: 0 });
+
+    await installUserSteering(home);
+    expect((await userSteeringStatus(home)).state).toBe('current');
+  });
+});
+
 describe('status integration', () => {
   it('reports steering installed/not installed', async () => {
     const [ledgerDir, projectDir, homeDir] = await Promise.all([
@@ -202,7 +358,67 @@ describe('status integration', () => {
     await installSteering(projectDir);
     const after = await buildStatusReport({ projectDir, homeDir, source });
     expect(after).toContain(
-      `copilot steering (compressor agent + /compressor): installed (${STEERING_PRIMARY_RELATIVE_PATH})`,
+      `copilot steering (compressor agent + /compressor): installed at ${STEERING_PRIMARY_RELATIVE_PATH} (v${STEERING_REVISION})`,
     );
+  });
+
+  it('reports user-profile steering and warns when both scopes define the agent', async () => {
+    const [ledgerDir, projectDir, homeDir] = await Promise.all([
+      tempDir('compressor-vscode-steering-ledger-'),
+      tempDir('compressor-vscode-steering-project-'),
+      tempDir('compressor-vscode-steering-home-'),
+    ]);
+    const source = createLedgerSource(ledgerDir);
+
+    expect(await buildStatusReport({ projectDir, homeDir, source }))
+      .toContain('copilot steering (user profile): not installed');
+
+    await installUserSteering(homeDir);
+    const withUser = await buildStatusReport({ projectDir, homeDir, source });
+    expect(withUser).toContain(`copilot steering (user profile): installed at ${userAgentPath(homeDir)} (v${STEERING_REVISION})`);
+    expect(withUser).not.toContain('both define a "compressor" agent');
+
+    await installSteering(projectDir);
+    expect(await buildStatusReport({ projectDir, homeDir, source }))
+      .toContain('both define a "compressor" agent');
+  });
+
+  it('flags an out-of-date install and names the fix', async () => {
+    const [ledgerDir, projectDir, homeDir] = await Promise.all([
+      tempDir('compressor-vscode-steering-ledger-'),
+      tempDir('compressor-vscode-steering-project-'),
+      tempDir('compressor-vscode-steering-home-'),
+    ]);
+    await installSteering(projectDir);
+    await writeFile(agentPath(projectDir), AGENT_CONTENT.replace(`v=${STEERING_REVISION} -->`, 'v=0 -->'), 'utf8');
+
+    const report = await buildStatusReport({ projectDir, homeDir, source: createLedgerSource(ledgerDir) });
+    expect(report).toContain(`OUT OF DATE (v0; this build writes v${STEERING_REVISION})`);
+    expect(report).toContain('re-run "Compressor: Enable Copilot Steering" to update');
+  });
+
+  it("does not call somebody else's user agent out of date", async () => {
+    const [ledgerDir, projectDir, homeDir] = await Promise.all([
+      tempDir('compressor-vscode-steering-ledger-'),
+      tempDir('compressor-vscode-steering-project-'),
+      tempDir('compressor-vscode-steering-home-'),
+    ]);
+    await mkdir(userAgentDir(homeDir), { recursive: true });
+    await writeFile(userAgentPath(homeDir), '---\nname: compressor\n---\nsomeone else\n', 'utf8');
+
+    const report = await buildStatusReport({ projectDir, homeDir, source: createLedgerSource(ledgerDir) });
+    expect(report).toContain('this extension did not write it');
+    expect(report).not.toContain('OUT OF DATE');
+  });
+
+  it('reports user-profile steering with no workspace folder open', async () => {
+    const [ledgerDir, homeDir] = await Promise.all([
+      tempDir('compressor-vscode-steering-ledger-'),
+      tempDir('compressor-vscode-steering-home-'),
+    ]);
+    await installUserSteering(homeDir);
+    const report = await buildStatusReport({ projectDir: undefined, homeDir, source: createLedgerSource(ledgerDir) });
+    expect(report).toContain('no workspace folder open');
+    expect(report).toContain('copilot steering (user profile): installed');
   });
 });

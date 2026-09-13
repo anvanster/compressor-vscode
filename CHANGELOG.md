@@ -1,18 +1,131 @@
 # Changelog
 
-## 0.4.0 — 2026-09-08
+## 0.5.0 — 2026-09-11
 
+- **Fixed: oversized search results could attribute a match to the wrong file.**
+  Trimming ran through the generic compression pipeline, whose head-and-tail
+  truncation cuts numbered text without regard for file boundaries, so a trimmed
+  result could strand later files' matches under an earlier file's header and
+  report them at that line number in the wrong file.
+  `#compressorSearch` no longer uses that pipeline, whose tiers all assume a
+  single file's contents, and instead bounds itself in whole matches,
+  re-rendering from the match list so every match keeps its own file header and
+  continuing with `skip=` rather than shell-oriented recovery advice.
+  `slim` now bounds search results about twice as tightly as `optimized`, where
+  the two previously produced identical search output.
 - Added confirmed `#compressorExecute` commands with exit status, bounded
   capture, diagnostic test summaries, an Output channel, and in-memory retained
   logs recoverable through `#compressorLog` without rerunning commands.
+  Timed-out and cancelled commands terminate the whole process tree on Windows
+  as well as POSIX.
+  The Commands panel is revealed only when a command fails, and a run no longer
+  interrupts with a notification.
 - Source reads now preserve code and semantic comments, reject output growth,
   support exact qualified-symbol reads, and use canonical workspace paths.
   Outlines prefer language-provider symbols and exact ranges.
+  A host token budget is a hard cap: when one is too small to fit a recovery
+  marker, the read returns a short recovery notice instead of the whole file.
+  A budget-trimmed read now names the line to resume from
+  (`continue with offset=N`) instead of only saying it was partial; without it
+  the model cannot tell what it is missing and re-reads the file by other means,
+  spending the saving immediately.
+  Read paths are trimmed, and a path that misses because the workspace folder's
+  own name was prefixed now suggests the corrected path rather than echoing a
+  raw ENOENT.
+- The project label now recovers instead of being lost for a whole window. The
+  shared key is read asynchronously, and attempting it once at activation left
+  any window that started too fast, or lost the creation race with another
+  window, recording unlabelled events for its entire lifetime — measured at 101
+  of 144 events in one session, 70% of the savings landing in `unattributed`.
+  Loading is now retried on demand, so a failure costs only the labels until the
+  next attempt succeeds.
+- Reads now accept files under VS Code's own
+  `GitHub.copilot-chat/chat-session-resources` folder, the single exception to
+  the workspace boundary. VS Code spills a tool result that is too large to pass
+  inline into that folder and hands the model the path; the file is this
+  extension's own output coming back, so refusing it protected nothing and only
+  drove the model to read the file uncompressed through the shell. Scoped to
+  that exact segment pair, with the size, regular-file and binary checks still
+  applied; nothing else outside the workspace became readable.
+- `#compressorExecute` refuses a command whose only effect is to print a file
+  (`cat`, `head`, `sed -n`, including inside a `bash -lc` wrapper) and names the
+  `#compressorRead` call to use instead. Command output is summarized for
+  diagnostics, so reading a file through the shell returned a scattered sample
+  of it rather than the file: one observed `sed -n '1,240p' package.json` came
+  back as 45 of the 240 lines requested. Every part of a compound command is
+  checked, since the observed case hid `cat` and `sed` between two `printf`
+  calls; a part that pipes, redirects or substitutes is processing its input
+  rather than merely reading it, and `tail -f` is a follow, so those are left
+  alone. Steering revision is now v3.
+- Steering now tells the model, in the agent, the prompt and the instructions
+  section alike, to state only what the tools actually returned: what each
+  coverage marker means, to fetch the rest with the offset the marker names
+  rather than substituting another tool, and that a symbol name is not evidence
+  of behaviour. The structural fixes below make the output honest about its own
+  coverage; this is what makes a model act on it. Existing installs
+  report as out of date until re-run.
+- **Reads degrade by level of detail instead of cutting the content.** A
+  truncated prefix loses either way: a weaker model describes the part it never
+  received, and a stronger one notices the gap and re-reads the file by other
+  means, spending more than if nothing had been compressed at all. When a whole
+  file will not fit, `#compressorRead` now returns the COMPLETE list of its
+  declarations with exact ranges (measured 84-93% smaller than the source)
+  instead of the first N lines. Nothing is missing at that level, so there is no
+  symbol to invent and no reason to re-read; the next step is one named range.
+  Cutting the file is now the last resort, used only when no symbol provider can
+  describe it.
+- A range read that stops short of the end of the file now says so
+  (`showing lines 1-60 of 291; continue with offset=61`). A prefix read used to
+  look identical to the whole file, so a model that read the first lines went on
+  to describe declarations it never saw. The continuation is offered only for a
+  range starting at line 1: a symbol or mid-file range was asked for on purpose,
+  and nudging a follow-up there only invites a read nobody needed.
+- Outlines now say up front that they are signatures with the bodies removed.
+  Without that, a model that outlines a file answers questions about its
+  behaviour from names alone, and produces a confident, wrong description
+  instead of reading the ranges it was handed.
+  The fallback outline's recovery markers also pointed at the built-in `Read`
+  and an absolute path; they now name `#compressorRead` and the workspace
+  relative path the caller used, which matters because the compressor agent's
+  allowlist removes the built-in read entirely.
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- The ledger now records which workspace each reduction came from, and the
+  savings report gained a per-project breakdown.
+  `compressor.projectLabel` defaults to `hashed`: the label is a keyed digest of
+  the workspace path.
+  The key is created on first use at `~/.compressor/project-salt`, owner-only and
+  outside the ledger directory so it never travels with a shared ledger.
+  The key and the labelling come from the compressor library (0.5.0), shared
+  with the CLI hooks, which populate the same label from the agent's working
+  directory — so a folder gets one label whichever tool records the event, and
+  the library renders the `by project` breakdown in the report itself.
+  Set it to `name` for clear-text folder names; the absolute path is never
+  recorded either way.
+- Steering older than the running build is surfaced passively: a warning on the
+  savings ticker and a banner in the report, alongside the existing
+  **Compressor: Status** line. No notification interrupts a session.
+- Steering files now carry a revision stamp, so re-running **Compressor: Enable
+  Copilot Steering** updates an install written by an older version in place and
+  reports what it replaced, rather than silently rewriting or silently doing
+  nothing.
+  An up-to-date install is left untouched, and **Compressor: Status** flags one
+  that has fallen behind.
+- **Compressor: Enable/Disable Copilot Steering** now asks for a scope.
+  **All workspaces (user profile)** installs the compressor agent alone to
+  `~/.copilot/agents/compressor.agent.md`, VS Code's documented user-level agent
+  folder, so the agent is offered in every workspace without writing into any
+  repo; it stays opt-in per chat.
+  The `/compressor` prompt and the instructions section remain workspace-only.
+  Because custom agents share one unqualified namespace, the agent now carries
+  an explicit `name`, a user-scope install asks before replacing a `compressor`
+  agent it did not write, and **Compressor: Status** reports both scopes and
+  warns when both define one.
 - Reframed the ticker and report as estimated tool-output reduction rather than
   net session savings, and added private window-local operation metrics.
+  The operation-metrics table is omitted until a tool has run, and its cells
+  carry spacing so the headers no longer run together in the report.
 - Updated Copilot steering for all five tools, refreshed usage examples and the
   walkthrough, and added regression coverage for tools, policies and packaging.
 

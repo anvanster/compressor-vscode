@@ -45,6 +45,18 @@ describe('formatMatches', () => {
   });
 });
 
+/** 30 files x 60 matching lines: large enough to exceed any default budget. */
+function oversized(): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (let f = 0; f < 30; f += 1) {
+    files[`${WS}/file${f}.ts`] = Array.from(
+      { length: 60 },
+      (_, i) => `const match_${f}_${i} = someVeryLongIdentifierToInflateLineLength_${i};`,
+    ).join('\n');
+  }
+  return files;
+}
+
 describe('runSearchTool', () => {
   it.each([false, true])('merges context windows with original coordinates (regex=%s)', async (isRegex) => {
     const out = await runSearchTool({ query: 'hit', isRegex, contextLines: 1 }, deps({
@@ -276,18 +288,79 @@ describe('runSearchTool', () => {
     expect(out.files).toBe(1); // only the text file
   });
 
-  it('compresses an oversized result set with a recoverable marker', async () => {
-    const files: Record<string, string> = {};
-    for (let f = 0; f < 30; f += 1) {
-      const lines: string[] = [];
-      for (let i = 0; i < 60; i += 1) {
-        lines.push(`const match_${f}_${i} = someVeryLongIdentifierToInflateLineLength_${i};`);
-      }
-      files[`${WS}/file${f}.ts`] = lines.join('\n');
-    }
-    const out = await runSearchTool({ query: 'match_', maxResults: 2000 }, deps(files));
+  it('bounds an oversized result set into whole matches, with no host budget', async () => {
+    const out = await runSearchTool({ query: 'match_', maxResults: 2000 }, deps(oversized()));
     expect(out.compressed).toBe(true);
     expect(out.text).toContain(OMISSION_MARKER);
     expect(out.text).toContain('matches in');
+    expect(out.text).toContain('continue with skip=');
+    // The file-read engine's head/tail truncation must never reach search output:
+    // its "lines A-B" range spans different files and its recovery advice names
+    // shell filters this tool does not offer.
+    expect(out.text).not.toContain('re-run with a narrower filter');
+    expect(out.text).not.toMatch(/lines \d+-\d+ omitted/);
+  });
+
+  it('pages through every match with no host budget, without gaps or repeats', async () => {
+    const files = oversized();
+    const delivered: string[] = [];
+    let skip = 0;
+    for (let page = 0; page < 40; page += 1) {
+      const out = await runSearchTool({ query: 'match_', maxResults: 2000, skip }, deps(files));
+      delivered.push(...[...out.text.matchAll(/→const (match_\d+_\d+)/g)].map((match) => match[1]!));
+      const continuation = /continue with skip=(\d+)/.exec(out.text);
+      if (!continuation) break;
+      expect(Number(continuation[1])).toBe(delivered.length);
+      skip = Number(continuation[1]);
+    }
+    // discovery sorts paths lexicographically, so file10 precedes file2
+    const expected = Object.keys(files).sort().flatMap((file) => {
+      const index = /file(\d+)\.ts$/.exec(file)![1];
+      return Array.from({ length: 60 }, (_, i) => `match_${index}_${i}`);
+    });
+    expect(delivered).toEqual(expected);
+  });
+
+  it('attributes every delivered match to its own file header', async () => {
+    const out = await runSearchTool({ query: 'match_', maxResults: 2000 }, deps(oversized()));
+    let header: string | undefined;
+    let checked = 0;
+    for (const line of out.text.split('\n')) {
+      const file = /^file(\d+)\.ts$/.exec(line);
+      if (file) {
+        header = file[1];
+        continue;
+      }
+      const match = /^\s*\d+→const match_(\d+)_/.exec(line);
+      if (!match) continue;
+      // a match rendered under the wrong header is the misattribution this
+      // tool's own paging exists to prevent
+      expect(match[1]).toBe(header);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
+
+  it('leaves full mode unbounded and makes slim tighter than optimized', async () => {
+    const files = oversized();
+    const full = await runSearchTool({ query: 'match_', maxResults: 2000 }, deps(files, { mode: 'full' }));
+    const optimized = await runSearchTool({ query: 'match_', maxResults: 2000 }, deps(files));
+    const slim = await runSearchTool({ query: 'match_', maxResults: 2000 }, deps(files, { mode: 'slim' }));
+    expect(full.compressed).toBe(false);
+    expect(optimized.text.length).toBeLessThan(full.text.length);
+    expect(slim.text.length).toBeLessThan(optimized.text.length);
+  });
+
+  it('returns matched comment lines verbatim', async () => {
+    const files = {
+      [`${WS}/main.go`]: ['//go:build linux', '//go:generate stringer -type=X', 'package main'].join('\n'),
+      [`${WS}/app.py`]: ['import os', '# type: ignore', 'x = 1'].join('\n'),
+    };
+    const out = await runSearchTool({ query: 'go:', maxResults: 50 }, deps(files));
+    expect(out.text).toContain('//go:build linux');
+    expect(out.text).toContain('//go:generate stringer -type=X');
+    expect(out.text).not.toContain('comment/blank lines stripped');
+    const py = await runSearchTool({ query: 'type: ignore', maxResults: 50 }, deps(files));
+    expect(py.text).toContain('# type: ignore');
   });
 });

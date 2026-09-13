@@ -22,7 +22,25 @@ export async function measureOperation<T>(operation: Operation, targeted: boolea
 
 export function resetOperationMetrics(): void { metrics.clear(); }
 
+const fmt = (n: number): string => n.toLocaleString('en-US');
+
+// The report's own stylesheet has no table rules, so without these the header
+// cells run together into one line. Inline because the surrounding HTML comes
+// from the library's renderer and this section is spliced into it.
+const CELL = 'padding:0.25rem 0.9rem 0.25rem 0;text-align:left';
+
+/** Empty until a tool runs in this window; an all-zero table says nothing. */
 export function operationMetricsHtml(): string {
-  const rows = [...metrics].map(([name, row]) => `<tr><td>${name}</td><td>${row.calls}</td><td>${row.outputChars}</td><td>${row.targetedReads}</td><td>${row.errors}</td><td>${row.durationMs}</td></tr>`).join('');
-  return `<h2>This extension window</h2><p>Resets on reload. Output characters include retrieval traffic; targeted reads are not necessarily recovery reads. These are operation metrics, not net session or billed savings.</p><table><tr><th>Tool</th><th>Calls</th><th>Output chars</th><th>Targeted reads</th><th>Errors</th><th>Total ms</th></tr>${rows}</table>`;
+  if (metrics.size === 0) {
+    return '';
+  }
+  const head = ['Tool', 'Calls', 'Output chars', 'Targeted reads', 'Errors', 'Total ms']
+    .map((label) => `<th style="${CELL}">${label}</th>`).join('');
+  const rows = [...metrics].map(([name, row]) =>
+    `<tr>${[name, fmt(row.calls), fmt(row.outputChars), fmt(row.targetedReads), fmt(row.errors), fmt(row.durationMs)]
+      .map((cell) => `<td style="${CELL}">${cell}</td>`).join('')}</tr>`).join('');
+  return '<h2>This extension window</h2><p>Resets on reload. Output characters include ' +
+    'retrieval traffic; targeted reads are not necessarily recovery reads. These are ' +
+    'operation metrics, not net session or billed savings.</p>' +
+    `<table style="border-collapse:collapse"><tr>${head}</tr>${rows}</table>`;
 }

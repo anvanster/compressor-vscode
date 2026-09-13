@@ -23,14 +23,36 @@ for an in-editor tour of the steps below.
    and every read goes through the compressor tools. It also adds a marker-fenced
    nudge to `.github/copilot-instructions.md` for the default agent (advisory —
    VS Code can't force tool choice, so the agent/prompt are the real lever).
+   The command asks for a scope.
+   **All workspaces (user profile)** installs the agent alone to
+   `~/.copilot/agents/compressor.agent.md`, VS Code's documented user-level
+   agent folder, so **compressor** appears in the agents dropdown in every
+   workspace without writing into any repo.
+   It stays opt-in per chat: the toolset binds only in sessions where you pick
+   the agent.
+   The `/compressor` prompt and the instructions nudge stay workspace-only,
+   because user prompts live in VS Code profile storage with no documented path
+   and an always-on instructions file should not be switched on for every
+   workspace at once.
+   Custom agents share a single namespace, so a user-scope install asks before
+   replacing a `compressor` agent it did not write, and **Compressor: Status**
+   reports both scopes and warns when both define one.
+   If the agent does not appear in the dropdown, VS Code has an open issue
+   discovering user-level agents; workspace scope is unaffected.
 3. (Optional) Pick a compression level with the status-bar **`compressor: <mode>`**
   item, or **Compressor: Select Read Compression Mode**: `optimized` (default,
   preserve source and dedupe repeated log lines), `slim` (preserve source and
   compact search), or `full` (uncompressed reads/search). Explicit outline and
   command-summary tools still summarize in full mode.
 4. After installing a development VSIX, run **Developer: Reload Window** and
-  start a new chat. Regenerate steering explicitly if existing agent/prompt
-  files list only older tools; installation does not rewrite those files.
+  start a new chat.
+  Updating the extension does not rewrite steering files already on disk, so
+  re-run **Compressor: Enable Copilot Steering** to pick up a newer agent or
+  prompt.
+  Owned files carry a revision stamp: re-running updates them in place and
+  reports what it replaced, or says the install is already up to date.
+  **Compressor: Status** flags an out-of-date install so you do not have to
+  guess.
 
 ## 2. The `#compressorRead` tool (Copilot agent mode)
 
@@ -69,6 +91,13 @@ preserved; repeated log lines may collapse into a marker with an exact
 `offset`/`limit` recovery range. A tool invocation labeled “compressed” does not
 mean the response actually shrank. Whole-file reads can honor a host budget;
 explicit ranges and symbol reads remain exact.
+
+When a whole file does not fit the host's budget, the reply degrades in detail
+rather than in coverage: if a symbol provider can describe the file, you get the
+**complete** list of its declarations (no bodies, nothing dropped to fit), and
+the next step is one named range. Otherwise the trimmed output names the
+`offset` to continue from. A range that stops short of the end of the file is
+labeled with the lines shown out of the file's total.
 
 ### Find things with `#compressorSearch`
 
@@ -117,9 +146,11 @@ or use literal matching if it times out. Discovery is bounded and excludes
 generated/dependency directories; partial-scan warnings mean counts are not
 exhaustive.
 
-Host-budget trimming preserves complete match windows and gives a continuation
-based on represented matches. If no window fits, reduce context or use an exact
-read. Other compression markers may instead ask you to narrow the search.
+Results are bounded in whole matches, never cut mid-block: outside `full` mode a
+page is fitted to the host's budget, or to a built-in page budget when the host
+supplies none (`slim` about half of `optimized`). A bounded page re-renders the
+matches that fit, each keeping its file and line, and ends with the `skip=` value
+to continue from. If no complete match fits, reduce context or use an exact read.
 Follow the response's recovery guidance rather than advancing past omitted
 matches. Budgets are optional host hints, not a `compressorSearch` input.
 
@@ -172,11 +203,24 @@ Use `#compressorExecute` for noninteractive tests/builds in a trusted workspace.
 Review the command and working directory at confirmation: workspace validation
 is not a process sandbox. `timeoutSeconds` defaults to 120 and accepts 1-600.
 
+A command whose only effect is printing a file `compressor_read` can serve
+(`cat`, `head`, `nl`, `sed -n '1,200p'` and other pagers, also inside a
+`bash -lc` wrapper or one segment of a compound command) is refused, and the
+reply names the path to read instead: command output is summarized for
+diagnostics, so reading a file that way returns a sample of it, not the file.
+A compound command is refused whole - nothing runs - and the reply names the
+offending segment, so drop that segment and re-run the rest. A separator inside
+quotes or a command substitution is part of that word or nested command, not a
+segment boundary. Everything else still runs, including a pipe, a redirect, a
+follow (`tail -f`), a `tail` of the end of a file, and any path
+`compressor_read` cannot serve.
+
 ```text
-Use #compressorExecute in /home/jason/projects/compressor-vscode to run
-"env -u COMPRESSOR_NO_LEDGER npm test -- tests/search-tool.test.ts" with
-timeoutSeconds=120. Inspect the exit status. If diagnostics were omitted, use
-#compressorLog with the returned ID instead of rerunning the command.
+Use #compressorExecute to run
+"env -u COMPRESSOR_NO_LEDGER npm test -- tests/search-tool.test.ts" in the
+workspace root with timeoutSeconds=120. Inspect the exit status. If diagnostics
+were omitted, use #compressorLog with the returned ID instead of rerunning the
+command.
 ```
 
 The response includes exit status and a retained log ID. The **Compressor
@@ -194,8 +238,10 @@ Logs are held in this window's memory for up to 30 minutes and the last five
 commands. Reloading clears them. Output capture stops at 2 MB, so a capped log
 is only the captured portion. Retrieval accepts `offset` >= 1, `limit` 1-500
 and optional `characterOffset` >= 0. Retrieving a log adds traffic; it is not
-recorded as savings. Linux cancellation is tested; Windows process-tree cleanup
-remains a limitation.
+recorded as savings. A cancelled or timed-out command is stopped as a whole
+tree - the detached process group on macOS/Linux, `taskkill /T` on Windows - so
+a process the shell started is not left running. The POSIX path is covered by
+tests; the Windows path is not exercised by the test suite.
 
 ## 4. Understand the report
 
@@ -203,9 +249,12 @@ remains a limitation.
   (or run **Compressor: Show Savings**) to open the report.
 - The report's bars are two-tone: the **full bar is the total original tokens**,
   the **bright segment is estimated output reduction**, broken down by day, agent,
-  tool, and mode. The **by agent** view separates Copilot (VS Code) from Claude
-  Code and any other surfaces sharing the ledger. Hover a bar for the exact
-  chars breakdown.
+  tool, mode, and project. The **by agent** view separates Copilot (VS Code) from
+  Claude Code and any other surfaces sharing the ledger; project labels follow
+  `compressor.projectLabel` (see **Settings**). Hover a bar for the exact chars
+  breakdown.
+- Steering older than the running build appears as a banner at the top of the
+  report and as a warning on the status-bar ticker, never as a notification.
 - Optionally (set `compressor.showActualUsage`, off by default), an **actual
   usage** section below the charts reports authoritative token counts from this
   project's Claude Code session transcripts — real usage, *not savings* and not
@@ -224,7 +273,7 @@ controlled task comparisons including follow-up reads and log retrieval.
 |---|---|
 | **Count Tokens** | Exact chars + estimated tokens for the active file or selection. |
 | **Preview Compression** | Side-by-side diff of the active file/selection vs. what `compressor_read` would return. No file writes. |
-| **Status** | Per-adapter install status, steering state, and ledger recency. |
+| **Status** | Per-adapter install status, steering state for the workspace and the user profile (flagging an out-of-date install), and ledger recency. |
 | **Init / Set Instruction-Pack Mode / Uninstall** | Install/switch/remove the compressor instruction packs for agents, with a confirmation diff. |
 | **Enable / Disable Copilot Steering** | Manage extension-owned agent/prompt files and the fenced instructions section; select a root in multi-root workspaces. |
 
@@ -239,15 +288,37 @@ does not simulate the model host's token budget or tokenizer.
   the agent uses Compressor tools. Built-in terminal commands bypass command
   summaries and their reduction records.
 - Read/outline access is confined to canonical workspace paths and regular text
-  files up to 8 MB. Search reads discovered files in the selected scope and
-  applies additional file/size caps. Approved commands can access resources
-  outside that scope; do not treat them as confined file reads.
+  files up to 8 MB, with one deliberate exception: `compressor_read` also reads
+  files under VS Code's own `GitHub.copilot-chat/chat-session-resources` folder,
+  where it spills a tool result too large to pass inline. That file is this
+  extension's own output handed back, and refusing it only drove the model to
+  read it uncompressed through the shell. No other path outside the workspace is
+  readable. Search reads discovered files in the selected scope and applies
+  additional file/size caps. Approved commands can access resources outside that
+  scope; do not treat them as confined file reads.
 - Instruction packs reach Copilot through `.github/copilot-instructions.md` /
   `AGENTS.md` — see the [compressor docs](https://github.com/anvanster/compressor).
 
 ## Settings
 
+- `compressor.projectLabel` — `hashed` | `name` (default `hashed`): how the
+  ledger records which workspace a reduction came from, so the savings report can
+  show a per-project breakdown.
+  `hashed` records a keyed digest of the workspace path.
+  The key is generated on first use at `~/.compressor/project-salt`, owner-only,
+  deliberately outside the ledger directory so it never travels with a shared
+  ledger, and never written into the ledger itself, so a report you share cannot
+  be tested against guessed project names.
+  The key and the labelling come from the compressor library itself, shared with
+  the CLI, so a folder gets one label whichever tool recorded the event.
+  Delete the file to rotate it; existing events keep their old labels and show as
+  a separate group.
+  `name` records the workspace folder name in clear text.
+  The absolute path is never recorded in either mode, and events written by other
+  agents or before this setting existed group under `unattributed`.
 - `compressor.mode` — `full` | `optimized` | `slim` (default `optimized`): the
-  read tool's compression level.
+  read/search output policy.
+  `slim` bounds search results about twice as tightly as `optimized`.
+  `full` disables automatic bounding.
 - `compressor.savingsWindow` — `7d` | `30d` | `all` (default `30d`): lookback for
   the ticker and report.

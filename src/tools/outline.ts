@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
 import { readWorkspaceFile } from './workspace-file';
 import {
-  appendLedger,
   cheapEstimator,
   langFromPath,
   skeleton,
 } from '@astudioplus/compressor';
 import type { CompressMeta } from '@astudioplus/compressor';
-import { normalizeMode, numberLines, resolveWorkspacePath } from './read';
+import { normalizeMode, numberLines, readFailure, resolveWorkspacePath } from './read';
 import type { ReadToolDeps } from './read';
+import { recordEvent } from '../ledger';
 import { documentSymbols, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { selectOutput, fitOutput } from './output-policy';
@@ -34,6 +34,16 @@ export interface OutlineToolOutcome {
 }
 
 /** Pure-ish handler (fs injected); the vscode layer only adapts types. */
+/** Rewrite `Read <abs> with offset=N and limit=M` to this tool's own call. */
+export function retargetMarkers(text: string, absPath: string, requested: string): string {
+  const quoted = absPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(
+    new RegExp(`Read ${quoted} with offset=(\\d+) and limit=(\\d+) to retrieve`, 'g'),
+    (_match, offset: string, limit: string) =>
+      `compressor_read ${requested} offset=${offset} limit=${limit} to retrieve`,
+  );
+}
+
 export async function runOutlineTool(
   input: OutlineToolInput,
   deps: ReadToolDeps,
@@ -60,7 +70,8 @@ export async function runOutlineTool(
       raw = await read(resolved.absPath);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return { text: `compressor_outline: cannot read ${input.path}: ${reason}`, isError: true, outlined: false };
+      const failure = await readFailure(input.path, reason, deps.workspaceFolders, read);
+      return { text: failure.replace('compressor_read', 'compressor_outline'), isError: true, outlined: false };
     }
 
     const allLines = raw.split('\n');
@@ -73,11 +84,17 @@ export async function runOutlineTool(
     try { symbols = await (deps.symbols ?? (deps.readFile ? async () => [] : documentSymbols))(resolved.absPath); }
     catch { symbols = []; }
     if (symbols.length > 0) {
-      const formatted = formatSymbols(symbols);
+      // An outline is signatures with the bodies removed. Without saying so it
+      // reads like a complete description of the file, and a model will answer
+      // questions about behaviour from names alone rather than reading the
+      // ranges it was just handed.
+      const formatted = `${input.path}: signatures only, bodies omitted. ` +
+        'Read a range with compressor_read before describing what any of it does.\n' +
+        formatSymbols(symbols);
       const candidate = await fitOutput(formatted, deps, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
       const content = await selectOutput(numbered, candidate, deps);
       if (content !== numbered) {
-        void appendLedger({
+        void recordEvent({
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
           charsIn: numbered.length, charsOut: content.length,
           estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(content),
@@ -95,6 +112,11 @@ export async function runOutlineTool(
       targeted: false,
     };
     const result = skeleton(numbered, lang, meta, cheapEstimator);
+    // The engine's marker names the built-in `Read` and an absolute path. The
+    // built-in read is exactly what the compressor agent's allowlist removes,
+    // so the instruction is unfollowable there; point at this tool instead, and
+    // keep the workspace-relative path the model already used.
+    result.content = retargetMarkers(result.content, resolved.absPath, input.path);
     if (result.content !== numbered && await selectOutput(numbered, result.content, deps) === numbered) {
       return { text: numbered, isError: false, outlined: false };
     }
@@ -108,7 +130,7 @@ export async function runOutlineTool(
       };
     }
 
-    void appendLedger({
+    void recordEvent({
       ts: new Date().toISOString(),
       agent: 'vscode',
       tool: 'read',
