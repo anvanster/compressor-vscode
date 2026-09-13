@@ -295,24 +295,20 @@ describe('runReadTool', () => {
     expect(outcome.text).toContain('continue with offset=');
   });
 
-  it('dedents JSON losslessly, keeping values and line numbers exact', async () => {
-    const raw = '{\n    "a": 1,\n    "nested": {\n        "b": "  keep  inner  spaces  "\n    }\n}';
-    const outcome = await runReadTool({ path: 'data.json' }, deps({ readFile: async () => raw }));
-    const content = outcome.text.split('\n').map((line) => line.replace(/^\s*\d+→/, '')).join('\n');
-    expect(JSON.parse(content)).toEqual(JSON.parse(raw));
-    // a value's own spaces are data and must survive
-    expect(content).toContain('"  keep  inner  spaces  "');
-    expect(outcome.text).toContain('     4→');
-    expect(outcome.text).not.toContain('[compressor:');
-  });
-
-  it('never dedents a language where indentation or line starts can be data', async () => {
-    const py = 'def f():\n    return 1\n';
-    const ts = 'const help = `\n    indented string content\n`;\n';
-    for (const [file, raw] of [['a.py', py], ['a.ts', ts]] as const) {
+  it('returns every file verbatim, indentation included', async () => {
+    // JSON was briefly dedented here. Byte-exact values are not enough: a model
+    // that copies an `old_string` from a dedented read cannot match the indented
+    // file on disk, so what the tool returns has to be what the file contains.
+    const cases = [
+      ['data.json', '{\n    "a": 1,\n    "nested": {\n        "b": "  keep  inner  spaces  "\n    }\n}'],
+      ['a.py', 'def f():\n    return 1\n'],
+      ['a.ts', 'const help = `\n    indented string content\n`;\n'],
+    ] as const;
+    for (const [file, raw] of cases) {
       const outcome = await runReadTool({ path: file }, deps({ readFile: async () => raw }));
       const content = outcome.text.split('\n').map((line) => line.replace(/^\s*\d+→/, '')).join('\n');
-      expect(content).toContain('    ');
+      expect(content, file).toBe(raw.replace(/\n$/, ''));
+      expect(outcome.text, file).not.toContain('[compressor:');
     }
   });
 

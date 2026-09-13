@@ -58,26 +58,16 @@ export function numberedText(lines: readonly string[], offset = 1): string {
   return lines.map((text, index) => `${String(offset + index).padStart(6)}→${text}`).join('\n');
 }
 
-/**
- * JSON cannot contain a literal newline inside a string, so the start of every
- * line is always outside a string: dropping leading whitespace leaves every
- * value byte-exact and keeps line numbers. Measured 31% on package.json and 26%
- * on package-lock.json, with nothing omitted.
- *
- * Deliberately NOT applied to TS/JS/Go/Rust, where template and raw strings span
- * lines so leading whitespace can be data, nor to Python/YAML/Markdown, where
- * indentation is syntax. Those only yield 6-7% anyway, so the risk buys nothing.
- */
-const DEDENTABLE = /\.(json|jsonc)$/i;
-
-export function losslessLines(lines: readonly string[], file: string): readonly string[] {
-  return DEDENTABLE.test(file) ? lines.map((line) => line.replace(/^[ \t]+/, '')) : lines;
-}
+// JSON was briefly dedented here: a JSON string cannot contain a literal
+// newline, so dropping leading whitespace kept every value byte-exact and saved
+// a measured 31% on package.json. It was removed anyway, because byte-exact is
+// not the same as unchanged. A model that copies an `old_string` out of a
+// dedented read and issues an edit gets no match against the indented file on
+// disk, and the tool's own contract ("source code and comments are preserved",
+// and coverage markers the model is told to read literally) promises the bytes
+// it returns are the bytes in the file. Reads stay verbatim.
 
 export function readCandidate(lines: readonly string[], file: string, mode: string, targeted: boolean): string {
-  if (mode !== 'full' && DEDENTABLE.test(file)) {
-    return numberedText(losslessLines(lines, file));
-  }
   const original = numberedText(lines);
   if (mode === 'full' || targeted || langFromPath(file) !== undefined || /\.(json|jsonc|md|mdx|xml|html)$/i.test(file)) return original;
   const output: string[] = [];

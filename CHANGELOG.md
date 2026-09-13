@@ -74,13 +74,6 @@
   symbol to invent and no reason to re-read; the next step is one named range.
   Cutting the file is now the last resort, used only when no symbol provider can
   describe it.
-- JSON is dedented losslessly: a JSON string cannot contain a literal newline,
-  so the start of every line is outside any string and leading whitespace can go
-  with every value left byte-exact and line numbers intact. Measured 31% on
-  package.json and 26% on package-lock.json, with nothing omitted. Deliberately
-  not applied to TS/JS/Go/Rust, where template and raw strings span lines, nor to
-  Python/YAML, where indentation is syntax; those yield only 6-7%, so the risk
-  would buy nothing.
 - A range read that stops short of the end of the file now says so
   (`showing lines 1-60 of 291; continue with offset=61`). A prefix read used to
   look identical to the whole file, so a model that read the first lines went on
@@ -131,6 +124,8 @@
   warns when both define one.
 - Reframed the ticker and report as estimated tool-output reduction rather than
   net session savings, and added private window-local operation metrics.
+  The operation-metrics table is omitted until a tool has run, and its cells
+  carry spacing so the headers no longer run together in the report.
 - Updated Copilot steering for all five tools, refreshed usage examples and the
   walkthrough, and added regression coverage for tools, policies and packaging.
 
