@@ -32,18 +32,30 @@ describe('spilled tool results', () => {
     for (const file of spill) expect(isChatSessionResource(file), file).toBe(true);
   });
 
-  it('stays inside the storage area the extension host named', async () => {
-    const user = path.join(os.tmpdir(), 'compressor-user-storage');
+  it('stays inside the storage area, under the default profile and a custom one', async () => {
+    const user = path.join(os.tmpdir(), 'compressor-user-data', 'User');
+    // spilled results live beside globalStorage, not under it, and a custom
+    // profile moves globalStorage a further two levels down
+    const spilled = path.join(
+      user, 'workspaceStorage', 'abc', 'GitHub.copilot-chat', 'chat-session-resources', 's1', 'content.txt',
+    );
+    const elsewhere = path.join(
+      os.tmpdir(), 'elsewhere', 'GitHub.copilot-chat', 'chat-session-resources', 'content.txt',
+    );
     try {
-      await setChatResourceRoot(user);
-      const inside = path.join(
-        user, 'workspaceStorage', 'abc', 'GitHub.copilot-chat', 'chat-session-resources', 's1', 'content.txt',
-      );
-      expect(isChatSessionResource(inside)).toBe(true);
-      // the same segment pair anywhere else is not VS Code's spill folder
-      expect(isChatSessionResource(
-        path.join(os.tmpdir(), 'elsewhere', 'GitHub.copilot-chat', 'chat-session-resources', 'content.txt'),
-      )).toBe(false);
+      for (const globalStorage of [
+        path.join(user, 'globalStorage', 'aStudioPlus.compressor-vscode'),
+        path.join(user, 'profiles', '-abc123', 'globalStorage', 'aStudioPlus.compressor-vscode'),
+      ]) {
+        await setChatResourceRoot(globalStorage);
+        expect(isChatSessionResource(spilled), globalStorage).toBe(true);
+        expect(isChatSessionResource(elsewhere), globalStorage).toBe(false);
+      }
+
+      // an unrecognisable layout leaves the area unknown rather than refusing
+      // every spilled result
+      await setChatResourceRoot(path.join(os.tmpdir(), 'odd-layout', 'storage'));
+      expect(isChatSessionResource(spilled)).toBe(true);
     } finally {
       await setChatResourceRoot(undefined);
     }

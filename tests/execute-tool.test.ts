@@ -232,6 +232,21 @@ it('does not split a command on a separator inside quotes', async () => {
   expect(pureFileRead('cat "report.txt')).toBeUndefined();
 });
 
+it('does not split inside a command substitution', async () => {
+  // the separator belongs to the nested command, so splitting there would name
+  // `foo.txt)` - a path that cannot exist
+  for (const command of [
+    'echo $(ls && cat foo.txt)',
+    'echo $(ls; cat foo.txt)',
+    'echo `ls && cat foo.txt`',
+    'printf "%s" "$(cat version.txt)"',
+  ]) {
+    expect(pureFileRead(command), command).toBeUndefined();
+  }
+  // a glob is not a single file either
+  expect(pureFileRead('cat *.log')).toBeUndefined();
+});
+
 it('names the offending part of a compound command, not the whole command', async () => {
   const message = rejection(await runExecuteTool({ command: 'echo start && cat package.json' }, DEPS));
   expect(message).toContain('One part of that command only prints a file');

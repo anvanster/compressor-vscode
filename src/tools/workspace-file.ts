@@ -20,22 +20,39 @@ const SESSION_RESOURCE = /(?:^|[\\/])GitHub\.copilot-chat[\\/]chat-session-resou
 
 /**
  * VS Code's `User` directory, holding both `globalStorage/` and the
- * `workspaceStorage/<hash>/` trees Copilot spills tool results into. Supplied
- * by the extension host at activation; until then the segment pair alone
- * decides, so a spilled result is never refused because of startup ordering.
- * Both the raw and the symlink-resolved form are kept, since the caller may
- * hand over either.
+ * `workspaceStorage/<hash>/` trees Copilot spills tool results into. Derived at
+ * activation from this extension's own global storage directory; until then the
+ * segment pair alone decides, so a spilled result is never refused because of
+ * startup ordering. Both the raw and the symlink-resolved form are kept, since
+ * the caller may hand over either.
  */
 let storageRoots: readonly string[] = [];
 
-export async function setChatResourceRoot(dir: string | undefined): Promise<void> {
-  if (dir === undefined) {
+/**
+ * `<user data>/User/globalStorage/<extension id>` under the default profile and
+ * `<user data>/User/profiles/<id>/globalStorage/<extension id>` under a custom
+ * one, so a fixed climb lands in a different place depending on the profile and
+ * misses the sibling `workspaceStorage/` that holds the spilled results. The
+ * `User` directory is the common ancestor of every layout, including remote and
+ * portable installs, so that is what the exception is anchored to. A layout with
+ * no `User` segment at all leaves the area unknown rather than guessed: the
+ * segment pair still has to match, and refusing our own output outright would
+ * push the model back onto the uncompressed shell read.
+ */
+function userStorageArea(globalStorageDir: string): string | undefined {
+  const parts = path.resolve(globalStorageDir).split(path.sep);
+  const index = parts.lastIndexOf('User');
+  return index < 1 ? undefined : parts.slice(0, index + 1).join(path.sep);
+}
+
+export async function setChatResourceRoot(globalStorageDir: string | undefined): Promise<void> {
+  const area = globalStorageDir === undefined ? undefined : userStorageArea(globalStorageDir);
+  if (area === undefined) {
     storageRoots = [];
     return;
   }
-  const raw = path.resolve(dir);
-  const resolved = await realpath(raw).catch(() => raw);
-  storageRoots = raw === resolved ? [raw] : [raw, resolved];
+  const resolved = await realpath(area).catch(() => area);
+  storageRoots = area === resolved ? [area] : [area, resolved];
 }
 
 export function isChatSessionResource(target: string): boolean {

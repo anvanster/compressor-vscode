@@ -112,37 +112,60 @@ const PAGER = /^(?:cat|head|tail|nl|bat|more|less)\b(?:\s+-{1,2}[\w-]+(?:[= ]\d+
 const SED_RANGE = /^sed\s+-n\s+['"]?\d+(?:,\d+)?p['"]?\s+(\S+)$/;
 
 /**
- * Split on `;`, a newline, `&&` and `||`, but only outside quotes: a separator
- * inside a quoted argument is data, so `echo "done; cat report.txt"` is one
- * command that prints a string, not two of which the second reads a file. A
- * bare `|` is never a separator here - a segment that still contains one is a
- * pipeline, which the caller skips.
+ * Split on `;`, a newline, `&&` and `||`, but only where the shell itself would:
+ * a separator inside a quoted argument (`echo "done; cat report.txt"`) or inside
+ * a command substitution (`echo $(ls && cat report.txt)`) is part of one word or
+ * one nested command, not a boundary between two commands. Splitting there would
+ * hand the caller a fragment like `cat report.txt)` and a filename no tool could
+ * open. A bare `|` is never a separator here - a segment that still contains one
+ * is a pipeline, which the caller skips.
  */
 function segments(text: string): string[] {
   const parts: string[] = [];
   let current = '';
   let quote: string | undefined;
+  let substitution = 0;
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] as string;
     if (char === '\\' && quote !== "'" && index + 1 < text.length) {
       current += char + text[index + 1];
       index += 1;
-    } else if (quote !== undefined) {
+      continue;
+    }
+    if (quote !== undefined) {
       current += char;
       if (char === quote) quote = undefined;
-    } else if (char === '"' || char === "'") {
+      continue;
+    }
+    // a backtick substitution runs until its partner the way a quote does
+    if (char === '"' || char === "'" || char === '`') {
       quote = char;
       current += char;
-    } else if (char === ';' || char === '\n') {
+      continue;
+    }
+    if (char === '$' && text[index + 1] === '(') {
+      substitution += 1;
+      current += '$(';
+      index += 1;
+      continue;
+    }
+    if (char === ')' && substitution > 0) {
+      substitution -= 1;
+      current += char;
+      continue;
+    }
+    if (substitution === 0 && (char === ';' || char === '\n')) {
       parts.push(current);
       current = '';
-    } else if ((char === '&' || char === '|') && text[index + 1] === char) {
+      continue;
+    }
+    if (substitution === 0 && (char === '&' || char === '|') && text[index + 1] === char) {
       parts.push(current);
       current = '';
       index += 1;
-    } else {
-      current += char;
+      continue;
     }
+    current += char;
   }
   parts.push(current);
   return parts;
@@ -190,10 +213,10 @@ export function fileReadSegment(
     const matched = (PAGER.exec(part) ?? SED_RANGE.exec(part))?.[1];
     if (matched === undefined) continue;
     const file = unquote(matched);
-    // A quote left inside the filename means the parse is wrong or the shell
-    // would expand it away; naming such a path would send the model after a
-    // file that cannot exist.
-    if (/['"]/.test(file)) continue;
+    // A shell metacharacter left in the filename means it is not a literal path:
+    // either the parse is wrong or the shell would expand it before any file is
+    // opened. Naming it would send the model after a path that cannot exist.
+    if (/['"`()*?]/.test(file)) continue;
     return { file, segment: part, whole: parts.length === 1 };
   }
   return undefined;
