@@ -18,8 +18,8 @@
   logs recoverable through `#compressorLog` without rerunning commands.
   Timed-out and cancelled commands terminate the whole process tree: the POSIX
   process-group kill is verified end to end (no surviving grandchildren after a
-  timeout), and the Windows `taskkill /t /f` path is implemented but has not been
-  run on Windows, so treat it as untested there.
+  timeout), and the Windows `taskkill /t /f` path is implemented but has not
+  been run on Windows, so treat it as untested there.
   The Commands panel is revealed only when a command fails, and a run no longer
   interrupts with a notification.
 - Source reads now preserve code and semantic comments, reject output growth,
