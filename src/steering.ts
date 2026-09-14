@@ -68,7 +68,7 @@ export function userAgentPath(home: string = os.homedir()): string {
  * install should pick up. Stamped into owned files so an install can say what
  * it replaced, and so `status` can name the revision on disk.
  */
-export const STEERING_REVISION = 3;
+export const STEERING_REVISION = 4;
 
 const OWNED_MARKER_PREFIX = '<!-- compressor-vscode:owned';
 const OWNED_MARKER_RE = /<!-- compressor-vscode:owned v=(\d+) -->/;
@@ -122,7 +122,8 @@ available in this agent. Read and search like this:
 
 - **\`compressorOutline\`** — call this first on any source file longer than
   ~200 lines to see its shape (top-level imports + signatures, bodies collapsed)
-  before reading bodies. Supports TS/JS, Python, Rust, and Go.
+  before reading bodies. Works in any language VS Code has a symbol provider
+  for; without one it falls back to a basic TS/JS, Python, Rust or Go outline.
 - **\`compressorRead\`** — read relevant \`offset\`/\`limit\` ranges or qualified
   \`symbol\` names. Whole-file reads suit small files or broad edits.
 - **\`compressorSearch\`** — find where something is defined or used (supports a
@@ -157,6 +158,11 @@ obey it literally.
   does.
 - \`signatures only, bodies omitted\` is a shape, not an implementation. Names
   are not evidence of behaviour.
+- A leading \`*\` marks a declaration the tools read as visible outside its file,
+  or outside its class for a member. An unmarked symbol is internal to that
+  file: do not present it as part of a public API. The mark is read from the
+  declaration line, so a missing \`*\` means "not shown to be public", not proof
+  that nothing else can reach it.
 - A \`[compressor: ...]\` marker always names the exact call that retrieves what
   it left out. Make that call. Do not substitute a different tool.
 

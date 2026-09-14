@@ -248,7 +248,7 @@
                 "toolReferenceName": "compressorOutline",
                 "displayName": "Code Outline",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
+                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. A leading * marks a declaration visible outside its file or class, so an outline separates a file's public surface from its internal helpers. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
