@@ -20,6 +20,24 @@ function harness(
 }
 
 describe('project resolver', () => {
+  it('never touches the key when recording is switched off', async () => {
+    // resolving a label reads and can CREATE ~/.compressor/project-salt, so a
+    // user who set COMPRESSOR_NO_LEDGER=1 must not get a key written anyway
+    let calls = 0;
+    const resolve = createProjectResolver({
+      salt: async () => { calls += 1; return 'key'; },
+      folder: () => '/w/project',
+      mode: () => 'hashed',
+      label: (p, m, k) => `${p}|${m}|${k}`,
+      disabled: () => true,
+    });
+    await settle();
+    expect(calls).toBe(0);
+    expect(resolve()).toBeUndefined();
+    await settle();
+    expect(calls).toBe(0);
+  });
+
   it('labels once the key arrives', async () => {
     const h = harness(async () => 'key1');
     expect(h.resolve()).toBeUndefined(); // still loading

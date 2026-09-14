@@ -96,6 +96,14 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- `COMPRESSOR_NO_LEDGER=1` switches the extension off completely. Resolving a
+  project label reads, and on a fresh machine creates,
+  `~/.compressor/project-salt`, and that ran before `appendLedger` got to check
+  the switch — so a user who had explicitly opted out still got a directory and
+  a key written into their home. The switch is now honoured at the top of the
+  recording path and before the key is loaded at activation. The library fixed
+  the same defect for the CLI hooks in 0.5.2; the extension has its own write
+  path and needed its own guard.
 - The ledger now records which workspace each reduction came from, and the
   savings report gained a per-project breakdown.
   `compressor.projectLabel` defaults to `hashed`: the label is a keyed digest of
