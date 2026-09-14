@@ -96,7 +96,7 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
-- `COMPRESSOR_NO_LEDGER=1` switches the extension off completely. Resolving a
+- `COMPRESSOR_NO_LEDGER=1` stops the extension recording anything. Resolving a
   project label reads, and on a fresh machine creates,
   `~/.compressor/project-salt`, and that ran before `appendLedger` got to check
   the switch — so a user who had explicitly opted out still got a directory and

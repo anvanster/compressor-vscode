@@ -12,6 +12,7 @@ function harness(
   let calls = 0;
   const resolve = createProjectResolver({
     salt: () => { calls += 1; return salt(); },
+    disabled: () => false,
     folder: () => opts.folder,
     mode: () => 'hashed',
     label: (path, mode, key) => `${path}|${mode}|${key}`,

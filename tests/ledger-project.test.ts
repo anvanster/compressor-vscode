@@ -126,6 +126,7 @@ describe('kill switch', () => {
     const dir = await tempDir('compressor-vscode-killswitch-');
     let resolved = 0;
     const previous = process.env['COMPRESSOR_LEDGER_DIR'];
+    const suppressed = process.env['COMPRESSOR_NO_LEDGER'];
     process.env['COMPRESSOR_LEDGER_DIR'] = dir;
     process.env['COMPRESSOR_NO_LEDGER'] = '1';
     try {
@@ -137,7 +138,8 @@ describe('kill switch', () => {
       expect(resolved).toBe(0);
       expect(await readLedger({ dir })).toEqual([]);
     } finally {
-      process.env['COMPRESSOR_NO_LEDGER'] = '1';
+      if (suppressed === undefined) delete process.env['COMPRESSOR_NO_LEDGER'];
+      else process.env['COMPRESSOR_NO_LEDGER'] = suppressed;
       if (previous === undefined) delete process.env['COMPRESSOR_LEDGER_DIR'];
       else process.env['COMPRESSOR_LEDGER_DIR'] = previous;
     }
