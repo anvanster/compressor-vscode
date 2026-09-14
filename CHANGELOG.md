@@ -116,6 +116,15 @@
   The mark reports declared visibility, not linkage: a `private:` C++ member
   has external linkage but is not marked, which is the distinction a caller
   reading the outline needs.
+  Steering now describes the mark alongside the other coverage markers, so an
+  unmarked symbol is not presented as public API, and says a missing `*` means
+  "not shown to be public" rather than proof of privacy, since a one-line read
+  under-marks rather than over-marks. The same pass corrects the agent's claim
+  that `compressorOutline` "Supports TS/JS, Python, Rust, and Go": that is the
+  no-provider fallback's list, and stating it as the tool's own capability
+  steered models away from outlining C++, Java and C# files that VS Code has a
+  symbol provider for. Steering revision is now v4; existing installs report as
+  out of date until re-run.
 - Two error messages that sent callers away from the tools. A workspace root, or
   `.`, was reported as "outside the open workspace folder(s)" — the root was
   excluded from its own containment check — and a directory was reported as
