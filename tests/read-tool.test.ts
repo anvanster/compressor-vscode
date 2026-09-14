@@ -170,15 +170,48 @@ describe('runReadTool', () => {
     expect(outcome.compressed).toBe(true);
   });
 
-  it('leaves an exact range and full mode unbudgeted', async () => {
+  it('leaves full mode unbudgeted', async () => {
     const raw = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
     const budget = { tokenBudget: 1, countTokens: async (text: string) => text.length };
-    const ranged = await runReadTool({ path: 'notes.txt', offset: 1, limit: 200 }, deps({ readFile: async () => raw, ...budget }));
     const full = await runReadTool({ path: 'notes.txt' }, deps({ readFile: async () => raw, mode: 'full', ...budget }));
-    expect(ranged.compressed).toBe(false);
-    expect(ranged.text).toContain('line 199');
     expect(full.compressed).toBe(false);
     expect(full.text).toContain('line 199');
+  });
+
+  // An exact range used to be exempt from the budget, on the reasoning that a
+  // verbatim range is what makes a read citable by line. The host disproved it:
+  // it spills any result over its own inline limit to a file, so an oversized
+  // range never reached the model verbatim anyway — it arrived as a path, and
+  // reading that path spilled again. The range is still verbatim as far as it
+  // goes; what changed is that it now stops at the budget and says where.
+  it('caps an exact range and reports the lines it actually returned', async () => {
+    const raw = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+    const outcome = await runReadTool({ path: 'notes.txt', offset: 1, limit: 200 }, deps({
+      readFile: async () => raw,
+      tokenBudget: 60,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(60);
+    // the note must not claim the 200 lines that were asked for
+    const claimed = /showing lines 1-(\d+) of 200/.exec(outcome.text);
+    expect(claimed).not.toBeNull();
+    expect(Number(claimed![1])).toBeLessThan(200);
+    // and what it claims must be what is there
+    expect(outcome.text).toContain(`${claimed![1]}→line ${claimed![1]}`);
+  });
+
+  it('tells a capped range that a larger limit will not help', async () => {
+    const raw = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+    const read = (limit: number) => runReadTool({ path: 'notes.txt', offset: 1, limit }, deps({
+      readFile: async () => raw,
+      tokenBudget: 60,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    const small = await read(50);
+    const large = await read(200);
+    // the observed failure: the model raised limit and received the same bytes
+    expect(large.text).toBe(small.text);
+    expect(large.text).toContain('a larger limit returns the same bytes');
   });
 
   it('a budget-trimmed read names where to resume, and resuming covers the rest', async () => {

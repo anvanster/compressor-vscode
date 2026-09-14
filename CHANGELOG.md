@@ -109,8 +109,21 @@
   what it should summarize. The backstop is now shared by all three tools —
   5,000 tokens in `optimized`, 2,500 in `slim` — and the cap now applies to
   whichever of source or outline is selected, rather than only to the outline.
-  `full` mode is still never trimmed, and an explicit `offset`/`limit` still
-  returns its range verbatim, since that is what makes a read citable by line.
+  `full` mode is still never trimmed.
+- **Fixed: an explicit `offset`/`limit` was exempt from the budget.** The
+  exemption was meant to keep a range verbatim, so a read stays citable and
+  editable by line. The host disproves the premise: it spills any result over
+  its own inline limit to a chat-session resource file, so an oversized range
+  never reached the model verbatim anyway — it arrived as a path to re-read,
+  and that read spilled in turn. A range is still verbatim as far as it goes;
+  it now stops at the budget and says where to resume. Observed in Copilot: a
+  capped read was answered by re-requesting `offset=1` with the limit raised
+  400, then 2000, then 4000, receiving the same bytes each time, because the
+  budget bounds the output and the limit does not. The recovery marker now says
+  so outright. The coverage note counts the lines actually returned rather than
+  the lines requested, and its cost is reserved out of the budget instead of
+  added on top, since a cap that overshoots by the width of its own coverage
+  line is what makes a host spill in the first place.
 - Outlines and complete-structure listings now mark declarations that are
   visible outside their file with a leading `*`, and explain the mark in their
   own preamble whenever one appears. An outline previously listed every symbol
