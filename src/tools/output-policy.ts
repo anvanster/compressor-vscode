@@ -1,4 +1,29 @@
 import { langFromPath, cheapEstimator } from '@astudioplus/compressor';
+import type { Mode } from '@astudioplus/compressor';
+
+/**
+ * The cap to apply when the host supplies no budget of its own. optimized
+ * keeps the magnitude of the engine's former truncateBudget so output size is
+ * materially unchanged, and slim halves it, mirroring the library's own
+ * optimized:slim ratio.
+ */
+export const DEFAULT_TOKEN_BUDGET: Record<Exclude<Mode, 'full'>, number> = { optimized: 5_000, slim: 2_500 };
+
+/**
+ * The budget a call must actually fit in. `tokenizationOptions` is optional in
+ * the language-model tool API, so a host is free to send no budget at all, and
+ * treating that as "no cap" returns whole files: an outline of a package.json
+ * fell back to the source, came back uncapped, and the host spilled it to a
+ * chat-session resource file that the model then read — which spilled in turn.
+ * An absent budget means we choose one, not that there isn't one. Full mode is
+ * the deliberate exception: it is the setting that asks for untrimmed output.
+ */
+export function effectiveBudget(mode: Mode, tokenBudget: number | undefined): number | undefined {
+  if (mode === 'full') return undefined;
+  return tokenBudget !== undefined && Number.isFinite(tokenBudget) && tokenBudget > 0
+    ? tokenBudget
+    : DEFAULT_TOKEN_BUDGET[mode];
+}
 
 export interface OutputHints {
   tokenBudget?: number;

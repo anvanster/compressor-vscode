@@ -6,7 +6,7 @@ import { recordEvent } from '../ledger';
 import type { Mode } from '@astudioplus/compressor';
 import { normalizeMode } from './read';
 import { containsPath } from './workspace-file';
-import { fitOutput, tokenCounter } from './output-policy';
+import { DEFAULT_TOKEN_BUDGET, fitOutput, tokenCounter } from './output-policy';
 import type { OutputHints } from './output-policy';
 import { measureOperation } from '../operation-metrics';
 import { RegexScanner } from './regex-scanner';
@@ -67,7 +67,6 @@ const MAX_FILE_BYTES = 2_000_000;
  * line carries a distinct number prefix. Bounding happens here instead, in
  * whole matches, using the skip= contract this tool actually honours.
  */
-const DEFAULT_TOKEN_BUDGET: Record<Exclude<Mode, 'full'>, number> = { optimized: 5_000, slim: 2_500 };
 
 interface SearchBudget {
   tokens: number;

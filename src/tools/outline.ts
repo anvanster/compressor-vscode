@@ -11,7 +11,7 @@ import type { ReadToolDeps } from './read';
 import { recordEvent } from '../ledger';
 import { documentSymbols, exportLegend, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
-import { selectOutput, fitOutput } from './output-policy';
+import { effectiveBudget, selectOutput, fitOutput } from './output-policy';
 import { measureOperation } from '../operation-metrics';
 
 // The compressor_outline languageModelTools tool: returns a code file's
@@ -79,6 +79,7 @@ export async function runOutlineTool(
       allLines.pop();
     }
     const numbered = numberLines(allLines, 1);
+    const budgeted: ReadToolDeps = { ...deps, tokenBudget: effectiveBudget(deps.mode, deps.tokenBudget) };
     if (deps.cancelled?.()) throw new Error('Operation cancelled');
     let symbols: CodeSymbol[];
     try { symbols = await (deps.symbols ?? (deps.readFile ? async () => [] : documentSymbols))(resolved.absPath); }
@@ -93,8 +94,15 @@ export async function runOutlineTool(
         exportLegend(body) +
         'Read a range with compressor_read before describing what any of it does.\n' +
         body;
-      const candidate = await fitOutput(formatted, deps, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
-      const content = await selectOutput(numbered, candidate, deps);
+      const candidate = await fitOutput(formatted, budgeted, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
+      // The cap applies to whichever of the two is chosen. Selecting first and
+      // capping second matters when the outline loses: a JSON provider reports
+      // a symbol per key, so the outline of a package.json is larger than the
+      // file, and the source it falls back to is a whole file.
+      const content = await fitOutput(
+        await selectOutput(numbered, candidate, budgeted), budgeted,
+        `read a range with compressor_read ${input.path} offset=N limit=M`,
+      ) || candidate;
       if (content !== numbered) {
         void recordEvent({
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,

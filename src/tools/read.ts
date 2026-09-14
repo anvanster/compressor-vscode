@@ -7,7 +7,7 @@ import {
 } from '@astudioplus/compressor';
 import { recordEvent } from '../ledger';
 import type { Mode } from '@astudioplus/compressor';
-import { readCandidate, selectOutput, fitOutput } from './output-policy';
+import { effectiveBudget, readCandidate, selectOutput, fitOutput } from './output-policy';
 import type { OutputHints } from './output-policy';
 import { documentSymbols, exportLegend, flattenSymbols, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
@@ -281,10 +281,14 @@ export async function runReadTool(
     // returned even when the saving is small, and a budget too small for a
     // recovery marker yields a short notice rather than the whole file.
     const candidate = targeted ? numbered : readCandidate(allLines, resolved.absPath, deps.mode, false);
-    const reduced = await selectOutput(numbered, candidate, deps);
+    // An absent host budget is not an absent cap: see effectiveBudget. An
+    // explicit offset/limit still returns its range verbatim, which is the
+    // contract that makes a read citable and editable by line.
+    const capDeps: ReadToolDeps = { ...deps, tokenBudget: effectiveBudget(deps.mode, deps.tokenBudget) };
+    const reduced = await selectOutput(numbered, candidate, capDeps);
     let capped = targeted || deps.mode === 'full'
       ? reduced
-      : await fitOutput(reduced, deps, 'use compressor_read with offset/limit for the lines you still need, or compressor_outline');
+      : await fitOutput(reduced, capDeps, 'use compressor_read with offset/limit for the lines you still need, or compressor_outline');
     let budgeted = capped !== reduced;
     if (budgeted) {
       // prefer a complete structure over a truncated prefix; only when no
@@ -292,7 +296,7 @@ export async function runReadTool(
       const structure = await completeStructure(resolved.absPath, input.path, deps, allLines);
       const fitted = structure === undefined
         ? undefined
-        : await fitOutput(structure, deps, `read compressor_outline ${input.path} instead`);
+        : await fitOutput(structure, capDeps, `read compressor_outline ${input.path} instead`);
       if (fitted !== undefined && fitted !== '' && fitted === structure) {
         capped = structure;
         budgeted = true;

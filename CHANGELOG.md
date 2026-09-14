@@ -96,6 +96,21 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- **Fixed: an absent host budget was treated as no budget at all.**
+  `tokenizationOptions` is optional in the language-model tool API, and
+  `#compressorRead` and `#compressorOutline` passed the host's value straight
+  through, so a host that sent none got whole files back uncapped. Only
+  `#compressorSearch` had a backstop. Observed in Copilot: an outline of
+  `package.json` fell back to the source, because a JSON provider reports one
+  symbol per key and its outline is larger than the file; the uncapped source
+  overflowed the host's inline limit; VS Code spilled the result to a
+  chat-session resource file; the model read that file, and the read spilled in
+  turn. Nine calls, no file contents, and the model ended by asking the user
+  what it should summarize. The backstop is now shared by all three tools —
+  5,000 tokens in `optimized`, 2,500 in `slim` — and the cap now applies to
+  whichever of source or outline is selected, rather than only to the outline.
+  `full` mode is still never trimmed, and an explicit `offset`/`limit` still
+  returns its range verbatim, since that is what makes a read citable by line.
 - Outlines and complete-structure listings now mark declarations that are
   visible outside their file with a leading `*`, and explain the mark in their
   own preamble whenever one appears. An outline previously listed every symbol

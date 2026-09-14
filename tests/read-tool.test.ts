@@ -404,3 +404,37 @@ describe('runReadTool', () => {
     expect(outcome.text.split('\n')).toHaveLength(1); // short, not a stack
   });
 });
+
+describe('an absent host budget is not an absent cap', () => {
+  // tokenizationOptions is optional in the language-model tool API. Treating a
+  // missing budget as "no cap" returned whole files, which the host then had
+  // to spill to a chat-session resource file.
+  const BIG = Array.from({ length: 4_000 }, (_, i) => `line ${i + 1} of plain text content`).join('\n');
+
+  it('caps a whole-file read when the host supplies no budget', async () => {
+    const outcome = await runReadTool({ path: 'big.txt' }, deps({
+      readFile: async () => BIG,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(5_000);
+    expect(outcome.text).toContain('compressor:');
+  });
+
+  it('halves the backstop in slim', async () => {
+    const outcome = await runReadTool({ path: 'big.txt' }, deps({
+      mode: 'slim',
+      readFile: async () => BIG,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(2_500);
+  });
+
+  it('leaves full mode untrimmed, since that is what full asks for', async () => {
+    const outcome = await runReadTool({ path: 'big.txt' }, deps({
+      mode: 'full',
+      readFile: async () => BIG,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeGreaterThan(5_000);
+  });
+});

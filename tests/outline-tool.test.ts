@@ -133,3 +133,38 @@ describe('outline honesty', () => {
     expect(retargetMarkers('nothing to do here', '/w/a.ts', 'a.ts')).toBe('nothing to do here');
   });
 });
+
+describe('the budget is a cap, not a preference', () => {
+  // A JSON symbol provider reports one symbol per key, so the outline of a
+  // package.json is larger than the file. Falling back to the source is right;
+  // returning it uncapped is not. Observed in Copilot: the fallback overflowed
+  // the host's inline limit, VS Code spilled the result to a chat-session
+  // resource file, the model read that file, and the read spilled in turn —
+  // nine calls that never retrieved the file, ending in a question to the user.
+  const KEYS = 3_000;
+  const JSON_SRC = ['{', ...Array.from({ length: KEYS }, (_, i) => `  "key${i}": "value${i}",`), '}'].join('\n');
+  const jsonSymbols = async () => Array.from({ length: KEYS }, (_, i) => ({
+    // a real provider's detail strings make each line longer than the source line
+    name: `contributes.section.key${i}`, detail: `"value${i}"`,
+    column: 2, start: i + 2, end: i + 2, children: [],
+  }));
+
+  it('caps the source fallback when the host supplies no budget', async () => {
+    // The host is not required to send tokenizationOptions. With no budget the
+    // cap was skipped entirely and the whole file went back, which is what the
+    // host then had to spill.
+    const outcome = await runOutlineTool({ path: 'package.json' }, deps(JSON_SRC, {
+      symbols: jsonSymbols,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(5_000);
+  });
+
+  it('still says the output is partial when it caps the fallback', async () => {
+    const outcome = await runOutlineTool({ path: 'package.json' }, deps(JSON_SRC, {
+      symbols: jsonSymbols,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).toContain('compressor:');
+  });
+});
