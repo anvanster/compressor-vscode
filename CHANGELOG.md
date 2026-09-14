@@ -144,6 +144,13 @@
   The mark reports declared visibility, not linkage: a `private:` C++ member
   has external linkage but is not marked, which is the distinction a caller
   reading the outline needs.
+  Visibility is read from `selectionRange`, the name, rather than `range`:
+  `range` covers "everything else, e.g. comments and code", so for a documented
+  symbol it begins at the opening comment and a rule reading its first line
+  sees `/**` instead of the declaration. Caught only after a Copilot run still
+  called module-local helpers public API; checked against every source file in
+  this extension, where reading from `range` marked 0 of 170 exports and
+  reading from `selectionRange` marks all 170 and nothing else.
   Steering now describes the mark alongside the other coverage markers, so an
   unmarked symbol is not presented as public API, and says a missing `*` means
   "not shown to be public" rather than proof of privacy, since a one-line read

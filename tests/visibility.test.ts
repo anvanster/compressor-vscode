@@ -4,32 +4,28 @@ import { type CodeSymbol, exportLegend, formatSymbols } from '../src/tools/symbo
 /** Build a symbol tree by finding each name in the source, as a provider would. */
 function symbolsFor(source: string, spec: readonly (readonly [string, readonly string[]])[]): CodeSymbol[] {
   const lines = source.split('\n');
-  // A provider reports `range` over the whole declaration, not just the name:
-  // for `export function f()` the column is 0, not the offset of `f`. Back up
-  // from the name to the start of its declaration, which on a line holding
-  // several declarations is the last `;`, `{` or access-label `:` before it.
-  const locate = (name: string, after = 0): { start: number; column: number } => {
+  // A provider reports selectionRange over the name and range over the whole
+  // symbol, comments included. declLine/column mirror selectionRange; start
+  // mirrors range, so it walks back over any comment block above the name.
+  const locate = (name: string, after = 0): { declLine: number; column: number; start: number } => {
     for (let i = after; i < lines.length; i += 1) {
-      const line = lines[i]!;
-      const at = line.indexOf(name);
-      if (at < 0) continue;
-      const boundary = Math.max(
-        line.lastIndexOf(';', at), line.lastIndexOf('{', at), line.lastIndexOf(':', at),
-      );
-      const from = boundary < 0 ? 0 : boundary + 1;
-      return { start: i + 1, column: from + (line.slice(from).length - line.slice(from).trimStart().length) };
+      const column = lines[i]!.indexOf(name);
+      if (column < 0) continue;
+      let start = i;
+      while (start > 0 && /^\s*(\/\*\*|\*|\/\/|#)/.test(lines[start - 1]!)) start -= 1;
+      return { declLine: i + 1, column, start: start + 1 };
     }
     throw new Error(`no line contains ${name}`);
   };
   return spec.map(([parent, children]) => {
     const at = locate(parent);
-    let cursor = at.start - 1;
+    let cursor = at.declLine - 1;
     return {
-      name: parent, detail: '', ...at, end: at.start,
+      name: parent, detail: '', ...at, end: at.declLine,
       children: children.map((child) => {
         const childAt = locate(child, cursor);
-        cursor = childAt.start - 1;
-        return { name: child, detail: '', ...childAt, end: childAt.start, children: [] };
+        cursor = childAt.declLine - 1;
+        return { name: child, detail: '', ...childAt, end: childAt.declLine, children: [] };
       }),
     };
   });
@@ -134,6 +130,43 @@ describe('other languages', () => {
   it('marks Java public and leaves package-private alone', () => {
     const java = ['public class S {', '    public void run() {}', '    void pkg() {}', '}'].join('\n');
     expect(exported('S.java', java, [['S', ['run', 'pkg']]])).toEqual(['S', 'run']);
+  });
+});
+
+describe('the declaration line, not the range start', () => {
+  // DocumentSymbol.range covers "everything else, e.g. comments and code", so
+  // for a documented symbol it starts at the opening comment. Reading
+  // visibility from range.start marks nothing in a file that documents its
+  // exports — which is every file in this extension.
+  it('marks an export whose range starts at its JSDoc comment', () => {
+    const ts = [
+      '/**',
+      ' * Does a thing.',
+      ' */',
+      'export function documented() {}',
+      '',
+      '/** Internal helper. */',
+      'function documentedInternal() {}',
+    ].join('\n');
+    expect(exported('a.ts', ts, [['documented', []], ['documentedInternal', []]]))
+      .toEqual(['documented']);
+  });
+
+  it('marks a documented C++ file-scope function and not a documented static', () => {
+    const cpp = [
+      '// Computes the area.',
+      'int computeArea(int w, int h);',
+      '',
+      '// Clamps a value.',
+      'static int clampToRange(int v);',
+    ].join('\n');
+    expect(exported('a.cpp', cpp, [['computeArea', []], ['clampToRange', []]]))
+      .toEqual(['computeArea']);
+  });
+
+  it('still finds `static` on the line above a documented declaration', () => {
+    const cpp = ['/** Tidies up. */', 'static', 'void tidyUp() {}'].join('\n');
+    expect(exported('a.cpp', cpp, [['tidyUp', []]])).toEqual([]);
   });
 });
 

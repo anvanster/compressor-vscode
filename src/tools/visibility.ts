@@ -19,13 +19,13 @@
 export interface VisibilityContext {
   /** Symbol name, unqualified. */
   name: string;
-  /** The declaration line, from the symbol's start column onward. */
+  /** The whole declaration line, trimmed. */
   decl: string;
-  /** 1-based line the declaration starts on. */
+  /** 1-based line the name sits on. */
   start: number;
-  /** 1-based line the enclosing symbol starts on; 0 at file scope. */
+  /** 1-based declaration line of the enclosing symbol; 0 at file scope. */
   containerStart: number;
-  /** Start column of the declaration, 0-based. */
+  /** Column of the name within the declaration line, 0-based. */
   column: number;
   /** Every line of the file. */
   lines: readonly string[];

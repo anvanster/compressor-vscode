@@ -4,8 +4,17 @@ import { visibilityRule } from './visibility';
 export interface CodeSymbol {
   name: string;
   detail: string;
+  /** 1-based first line of the symbol, comments included: the range to read. */
   start: number;
   end: number;
+  /**
+   * 1-based line the name sits on. `range` deliberately covers "everything
+   * else, e.g. comments and code", so for a documented symbol `start` is the
+   * line of its opening comment, not of its declaration. Reading visibility
+   * off `start` marks nothing in a commented file.
+   */
+  declLine: number;
+  /** Column of the name within declLine, 0-based. */
   column: number;
   children: CodeSymbol[];
 }
@@ -22,12 +31,15 @@ export async function documentSymbols(file: string): Promise<CodeSymbol[]> {
   );
   const convert = (symbol: vscode.DocumentSymbol | vscode.SymbolInformation): CodeSymbol => {
     const range = 'range' in symbol ? symbol.range : symbol.location.range;
+    // SymbolInformation carries no selectionRange; its range is all there is.
+    const name = 'selectionRange' in symbol ? symbol.selectionRange.start : range.start;
     return {
       name: symbol.name,
       detail: 'detail' in symbol ? symbol.detail : '',
       start: range.start.line + 1,
       end: range.end.line + 1,
-      column: range.start.character,
+      declLine: name.line + 1,
+      column: name.character,
       children: 'children' in symbol ? symbol.children.map(convert) : [],
     };
   };
@@ -81,18 +93,20 @@ function visibleNames(
   const walk = (nodes: readonly CodeSymbol[], parent: string, containerStart: number): void => {
     for (const symbol of nodes) {
       const name = parent ? `${parent}.${symbol.name}` : symbol.name;
-      const line = source.lines[symbol.start - 1];
+      const line = source.lines[symbol.declLine - 1];
       const ok = line !== undefined && rule({
         name: symbol.name,
-        decl: line.slice(symbol.column).trimStart(),
-        start: symbol.start,
+        // The whole line: a keyword like `export` or `static` sits to the left
+        // of the name, so slicing at the name's column would discard it.
+        decl: line.trim(),
+        start: symbol.declLine,
         containerStart,
         column: symbol.column,
         lines: source.lines,
       });
       if (ok) visible.add(name);
       // An invisible container hides everything under it, so stop descending.
-      if (ok) walk(symbol.children, name, symbol.start);
+      if (ok) walk(symbol.children, name, symbol.declLine);
     }
   };
   walk(symbols, '', 0);

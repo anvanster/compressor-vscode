@@ -106,9 +106,9 @@ describe('outline honesty', () => {
         (_, i) => `  run${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
       ).join('\n'),
       symbols: async () => [{
-        name: 'Service', detail: '', column: 0, start: 1, end: 120,
+        name: 'Service', detail: '', column: 0, declLine: 1, start: 1, end: 120,
         children: Array.from({ length: 40 }, (_, i) => ({
-          name: `run${i}`, detail: '', column: 0, start: i * 3 + 1, end: i * 3 + 3, children: [],
+          name: `run${i}`, detail: '', column: 0, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
         })),
       }],
     });
@@ -146,7 +146,7 @@ describe('the budget is a cap, not a preference', () => {
   const jsonSymbols = async () => Array.from({ length: KEYS }, (_, i) => ({
     // a real provider's detail strings make each line longer than the source line
     name: `contributes.section.key${i}`, detail: `"value${i}"`,
-    column: 2, start: i + 2, end: i + 2, children: [],
+    column: 2, declLine: i + 2, start: i + 2, end: i + 2, children: [],
   }));
 
   it('caps the source fallback when the host supplies no budget', async () => {
