@@ -164,6 +164,7 @@ by language extension; an outline is not guaranteed to contain every symbol.
 A leading `*` marks a declaration that is visible outside its file, or outside
 its class for a member, and the outline says so in its own preamble whenever it
 marks anything.
+An unmarked name is internal to that file and is not part of its API.
 The mark is read from the declaration line — `export`, `pub`, a capitalised Go
 name, an absent Python underscore, `public`, and for C and C++ the absence of
 file-scope `static` or an anonymous namespace — so it is a hint rather than a

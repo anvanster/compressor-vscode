@@ -67,14 +67,19 @@ export interface SymbolSource {
 /**
  * One sentence for the preamble explaining the `*` in formatted output, or ''
  * when that output carries no mark. Stating what the mark means is the point:
- * an unexplained sigil is one more thing for a model to guess at. Taking the
+ * an unexplained sigil is one more thing for a model to guess at, and a model
+ * shown correct marks still listed four unmarked symbols as module API, so the
+ * sentence states the consequence rather than only the meaning. The caveat it
+ * used to carry — that a one-line read under-marks — lives in the agent file,
+ * which is where nuance belongs; output that is read once needs an
+ * instruction. Taking the
  * formatted text rather than the language keeps the two in step — the sentence
  * costs budget that a structure listing needs, so it is never spent on a
  * legend for a mark that does not appear.
  */
 export function exportLegend(formatted: string): string {
   return /^\*/m.test(formatted)
-    ? '* = declared visible outside this file or its class (read from the declaration line; a hint). '
+    ? '* = visible outside this file or its class; unmarked names are internal to it, so do not list them as its API. '
     : '';
 }
 
