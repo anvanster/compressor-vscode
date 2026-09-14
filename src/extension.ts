@@ -2,7 +2,12 @@ import * as vscode from 'vscode';
 import { createLedgerSource } from './ledger-source';
 import { setProjectResolver } from './ledger';
 import { createProjectResolver } from './project-resolver';
-import { ensureProjectSalt, normalizeProjectLabelMode, projectLabel } from '@astudioplus/compressor';
+import {
+  ensureProjectSalt,
+  ledgerDisabled,
+  normalizeProjectLabelMode,
+  projectLabel,
+} from '@astudioplus/compressor';
 import { SavingsTicker } from './ticker';
 import { SavingsPanel } from './savings-panel';
 import { registerStatusCommand } from './status';
@@ -42,6 +47,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // candidate project names.
   setProjectResolver(createProjectResolver({
     salt: ensureProjectSalt,
+    disabled: ledgerDisabled,
     folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
     mode: () => normalizeProjectLabelMode(
       vscode.workspace.getConfiguration('compressor').get('projectLabel'),

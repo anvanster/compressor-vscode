@@ -96,13 +96,24 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- `COMPRESSOR_NO_LEDGER=1` stops the extension recording anything. The switch is
+  read from the extension host's own environment, so it has to be set for the
+  VS Code process itself; exporting it in an integrated terminal does not reach
+  the host, and there is no equivalent `compressor.*` setting. Resolving a
+  project label reads, and on a fresh machine creates,
+  `~/.compressor/project-salt`, and that ran before `appendLedger` got to check
+  the switch — so a user who had explicitly opted out still got a directory and
+  a key written into their home. The switch is now honoured at the top of the
+  recording path and before the key is loaded at activation. The library fixed
+  the same defect for the CLI hooks in 0.5.2; the extension has its own write
+  path and needed its own guard.
 - The ledger now records which workspace each reduction came from, and the
   savings report gained a per-project breakdown.
   `compressor.projectLabel` defaults to `hashed`: the label is a keyed digest of
   the workspace path.
   The key is created on first use at `~/.compressor/project-salt`, owner-only and
   outside the ledger directory so it never travels with a shared ledger.
-  The key and the labelling come from the compressor library (0.5.0), shared
+  The key and the labelling come from the compressor library (0.5.2), shared
   with the CLI hooks, which populate the same label from the agent's working
   directory — so a folder gets one label whichever tool records the event, and
   the library renders the `by project` breakdown in the report itself.

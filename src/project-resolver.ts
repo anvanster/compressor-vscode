@@ -5,6 +5,8 @@ import type { ProjectLabelMode } from '@astudioplus/compressor';
 export interface ProjectResolverDeps {
   /** reads the shared key, creating it on first use; may fail transiently */
   salt: () => Promise<string | undefined>;
+  /** true when recording is switched off, so the key must not be touched */
+  disabled: () => boolean;
   /** first workspace folder, or undefined when none is open */
   folder: () => string | undefined;
   mode: () => ProjectLabelMode;
@@ -33,7 +35,10 @@ export function createProjectResolver(deps: ProjectResolverDeps): () => string |
   let loading = false;
   let attempts = 0;
   const load = (): void => {
+    // the eager load at activation runs before any event is recorded, so the
+    // kill switch has to be honoured here too or the key is created regardless
     if (salt !== undefined || loading || attempts >= MAX_LOAD_ATTEMPTS) return;
+    if (deps.disabled()) return;
     attempts += 1;
     loading = true;
     void deps.salt().then(

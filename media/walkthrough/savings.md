@@ -26,4 +26,4 @@ Character counts are exact; token figures are estimates (chars / 3.5), not net
 chat or billed-token savings. Window-local operation counters reset on reload
 and do not identify individual chats. Reopen the report to refresh it. The
 ledger lives in `~/.compressor/ledger`; disable recording with
-`COMPRESSOR_NO_LEDGER=1`.
+`COMPRESSOR_NO_LEDGER=1` in VS Code's own environment.

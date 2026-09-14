@@ -120,3 +120,28 @@ describe('stale steering surfaces (no notification)', () => {
     expect(banner).toContain('older than this build writes');
   });
 });
+
+describe('kill switch', () => {
+  it('records nothing and resolves no label when switched off', async () => {
+    const dir = await tempDir('compressor-vscode-killswitch-');
+    let resolved = 0;
+    const previous = process.env['COMPRESSOR_LEDGER_DIR'];
+    const suppressed = process.env['COMPRESSOR_NO_LEDGER'];
+    process.env['COMPRESSOR_LEDGER_DIR'] = dir;
+    process.env['COMPRESSOR_NO_LEDGER'] = '1';
+    try {
+      setProjectResolver(() => { resolved += 1; return '#abc123def456'; });
+      await recordEvent(event('2026-09-14T10:00:00Z'));
+      await settleLedger();
+      // the label itself reads (and can create) the key file, so it must not
+      // even be computed once the user has opted out
+      expect(resolved).toBe(0);
+      expect(await readLedger({ dir })).toEqual([]);
+    } finally {
+      if (suppressed === undefined) delete process.env['COMPRESSOR_NO_LEDGER'];
+      else process.env['COMPRESSOR_NO_LEDGER'] = suppressed;
+      if (previous === undefined) delete process.env['COMPRESSOR_LEDGER_DIR'];
+      else process.env['COMPRESSOR_LEDGER_DIR'] = previous;
+    }
+  });
+});

@@ -11,8 +11,10 @@ Companion extension for
 [compressor](https://github.com/anvanster/compressor): compressed
 read/search/outline/execute/log tools for Copilot agent mode, a reduction report over
 the compressor ledger (`~/.compressor/ledger`, override with
-`COMPRESSOR_LEDGER_DIR`), and manage commands for instruction packs. The extension
-does not upload workspace content itself; approved commands can access the network.
+`COMPRESSOR_LEDGER_DIR`, or set `COMPRESSOR_NO_LEDGER=1` in VS Code's own
+environment to record nothing), and manage commands for instruction packs. The
+extension does not upload workspace content itself; approved commands can access
+the network.
 
 ## Features
 
@@ -86,7 +88,8 @@ does not upload workspace content itself; approved commands can access the netwo
   disabled. Project labels are hashed by default: the label is a keyed digest of
   the workspace path. The key is generated on first use at
   `~/.compressor/project-salt` (owner-only, and deliberately outside the ledger
-  directory so it never travels with a shared ledger). The key and the labelling
+  directory so it never travels with a shared ledger), and not generated at all
+  when `COMPRESSOR_NO_LEDGER=1` switches recording off. The key and the labelling
   both come from the compressor library, shared with the CLI, so a folder gets
   one label whichever tool records the event, and the key is never written to the
   ledger, so a shared report cannot be tested against candidate project names.
