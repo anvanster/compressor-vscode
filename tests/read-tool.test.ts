@@ -216,6 +216,27 @@ describe('runReadTool', () => {
     expect(outcome.text).toContain('continue with offset=');
   });
 
+  it('never tells the caller the workspace itself is outside the workspace', async () => {
+    // observed: a model outlined the workspace root, was told it was "outside
+    // the open workspace folder(s)", concluded the tool could not see the
+    // project at all, and answered from filenames instead of calling it again
+    for (const requested of [WS, '.', `${WS}/`]) {
+      const resolved = resolveWorkspacePath(requested, [WS]);
+      expect('error' in resolved, requested).toBe(false);
+    }
+  });
+
+  it('says a directory is a directory, and names the tool that lists one', async () => {
+    const outcome = await runReadTool({ path: 'src' }, deps({
+      readFile: async () => { throw new Error('a directory, not a file. List what is in it with compressor_search'); },
+    }));
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain('a directory, not a file');
+    expect(outcome.text).toContain('compressor_search');
+    // the old wording implied a size limit, which left no next step
+    expect(outcome.text).not.toContain('8 MB');
+  });
+
   it('tolerates stray whitespace around the path', async () => {
     const outcome = await runReadTool({ path: '  notes.txt  ' }, deps({ readFile: async () => 'hello\n' }));
     expect(outcome.isError).toBe(false);

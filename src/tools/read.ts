@@ -68,10 +68,12 @@ export function resolveWorkspacePath(
     : path.normalize(path.join(folders[0] ?? '', requested));
   // a spilled tool result: our own output, handed back by VS Code
   if (isChatSessionResource(candidate)) return { absPath: candidate };
-  const inside = folders.some((folder) => {
-    const rel = path.relative(folder, candidate);
-    return rel !== '' && containsPath(folder, candidate);
-  });
+  // A workspace root is inside the workspace. Excluding it here reported the
+  // root, and `.`, as "outside the open workspace folder(s)" — which a model
+  // reasonably reads as "this tool cannot see my project", and then answers
+  // from filenames instead of calling the tool again. Directories are rejected
+  // further down, by the check that knows they are directories.
+  const inside = folders.some((folder) => containsPath(folder, candidate));
   if (!inside) {
     return {
       error:

@@ -79,8 +79,20 @@ export async function canonicalWorkspacePath(target: string, roots: readonly str
 export async function readWorkspaceFile(target: string, roots: readonly string[]): Promise<string> {
   const canonical = await canonicalWorkspacePath(target, roots);
   const info = await stat(canonical);
-  if (!info.isFile() || info.size > 8_000_000) {
-    throw new Error('Only regular text files up to 8 MB can be read');
+  // Each case names what is actually wrong and what to do instead. "Only
+  // regular text files up to 8 MB" for a directory reads as a size limit, and
+  // leaves the caller with no next step.
+  if (info.isDirectory()) {
+    throw new Error(
+      'a directory, not a file. List what is in it with compressor_search ' +
+      '(output=files, include=<glob>), then read or outline one of those files',
+    );
+  }
+  if (!info.isFile()) {
+    throw new Error('not a regular file');
+  }
+  if (info.size > 8_000_000) {
+    throw new Error(`${(info.size / 1_000_000).toFixed(1)} MB, over the 8 MB read limit`);
   }
   const content = await readFile(canonical, 'utf8');
   if (content.includes('\u0000')) throw new Error('Binary files are not supported');
