@@ -16,8 +16,10 @@
 - Added confirmed `#compressorExecute` commands with exit status, bounded
   capture, diagnostic test summaries, an Output channel, and in-memory retained
   logs recoverable through `#compressorLog` without rerunning commands.
-  Timed-out and cancelled commands terminate the whole process tree on Windows
-  as well as POSIX.
+  Timed-out and cancelled commands terminate the whole process tree: the POSIX
+  process-group kill is verified end to end (no surviving grandchildren after a
+  timeout), and the Windows `taskkill /t /f` path is implemented but has not
+  been run on Windows, so treat it as untested there.
   The Commands panel is revealed only when a command fails, and a run no longer
   interrupts with a notification.
 - Source reads now preserve code and semantic comments, reject output growth,
@@ -45,8 +47,11 @@
   inline into that folder and hands the model the path; the file is this
   extension's own output coming back, so refusing it protected nothing and only
   drove the model to read the file uncompressed through the shell. Scoped to
-  that exact segment pair, with the size, regular-file and binary checks still
-  applied; nothing else outside the workspace became readable.
+  that segment pair beneath VS Code's own per-user storage directory once that
+  directory is known, and to the segment pair alone before activation resolves
+  it or on layouts it cannot be derived from, with the size, regular-file and
+  binary checks still applied; nothing else outside the workspace became
+  readable.
 - `#compressorExecute` refuses a command whose only effect is to print a file
   (`cat`, `head`, `sed -n`, including inside a `bash -lc` wrapper) and names the
   `#compressorRead` call to use instead. Command output is summarized for
