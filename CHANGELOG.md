@@ -96,6 +96,15 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- Two error messages that sent callers away from the tools. A workspace root, or
+  `.`, was reported as "outside the open workspace folder(s)" — the root was
+  excluded from its own containment check — and a directory was reported as
+  "Only regular text files up to 8 MB can be read", which reads as a size limit.
+  Observed together: a model outlined the workspace root, concluded from the
+  message that the extension could not see the project, and described the
+  repository from filenames rather than calling the tools again. A root now
+  resolves, and a directory says it is a directory and names `compressor_search`
+  (`output=files`) as the way to list one.
 - `COMPRESSOR_NO_LEDGER=1` stops the extension recording anything. The switch is
   read from the extension host's own environment, so it has to be set for the
   VS Code process itself; exporting it in an integrated terminal does not reach
