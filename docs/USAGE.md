@@ -309,6 +309,8 @@ does not simulate the model host's token budget or tokenizer.
   deliberately outside the ledger directory so it never travels with a shared
   ledger, and never written into the ledger itself, so a report you share cannot
   be tested against guessed project names.
+  Setting `COMPRESSOR_NO_LEDGER=1` in VS Code's own environment stops recording
+  and creates neither the key nor a label.
   The key and the labelling come from the compressor library itself, shared with
   the CLI, so a folder gets one label whichever tool recorded the event.
   Delete the file to rotate it; existing events keep their old labels and show as
