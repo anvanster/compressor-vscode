@@ -161,6 +161,17 @@ methods, details and exact ranges. Without a provider, a basic outline fallback
 supports TypeScript/JavaScript, Rust, Python and Go. Provider availability varies
 by language extension; an outline is not guaranteed to contain every symbol.
 
+A leading `*` marks a declaration that is visible outside its file, or outside
+its class for a member, and the outline says so in its own preamble whenever it
+marks anything.
+The mark is read from the declaration line — `export`, `pub`, a capitalised Go
+name, an absent Python underscore, `public`, and for C and C++ the absence of
+file-scope `static` or an anonymous namespace — so it is a hint rather than a
+guarantee, and it is inherited: a public method of a class the file never
+exports is not marked.
+Languages without a rule are left unmarked entirely, and no preamble claims
+otherwise.
+
 ```
 Outline #compressorOutline src/engine/index.ts, then read the body of compress()
 with #compressorRead at the offset/limit the marker shows.

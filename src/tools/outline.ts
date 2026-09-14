@@ -9,7 +9,7 @@ import type { CompressMeta } from '@astudioplus/compressor';
 import { normalizeMode, numberLines, readFailure, resolveWorkspacePath } from './read';
 import type { ReadToolDeps } from './read';
 import { recordEvent } from '../ledger';
-import { documentSymbols, formatSymbols } from './symbols';
+import { documentSymbols, exportLegend, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { selectOutput, fitOutput } from './output-policy';
 import { measureOperation } from '../operation-metrics';
@@ -88,9 +88,11 @@ export async function runOutlineTool(
       // reads like a complete description of the file, and a model will answer
       // questions about behaviour from names alone rather than reading the
       // ranges it was just handed.
+      const body = formatSymbols(symbols, { path: resolved.absPath, lines: allLines });
       const formatted = `${input.path}: signatures only, bodies omitted. ` +
+        exportLegend(body) +
         'Read a range with compressor_read before describing what any of it does.\n' +
-        formatSymbols(symbols);
+        body;
       const candidate = await fitOutput(formatted, deps, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
       const content = await selectOutput(numbered, candidate, deps);
       if (content !== numbered) {

@@ -100,7 +100,7 @@ describe('runReadTool', () => {
   it('reads the exact provider symbol range without compression', async () => {
     const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'Service.run' }, deps({
       readFile: async () => 'class Service {\n  run() {\n    return 42;\n  }\n}',
-      symbols: async () => [{ name: 'Service', detail: '', start: 1, end: 5, children: [{ name: 'run', detail: '', start: 2, end: 4, children: [] }] }],
+      symbols: async () => [{ name: 'Service', detail: '', column: 0, start: 1, end: 5, children: [{ name: 'run', detail: '', column: 0, start: 2, end: 4, children: [] }] }],
     }));
     expect(outcome.isError).toBe(false);
     expect(outcome.compressed).toBe(false);
@@ -112,7 +112,7 @@ describe('runReadTool', () => {
 
   it('rejects ambiguous symbol names instead of choosing a method silently', async () => {
     const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'run' }, deps({
-      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', start: 1, end: 5, children: [{ name: 'run', detail: '', start: 2, end: 4, children: [] }] })),
+      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', column: 0, start: 1, end: 5, children: [{ name: 'run', detail: '', column: 0, start: 2, end: 4, children: [] }] })),
     }));
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain('Ambiguous');
@@ -290,8 +290,8 @@ describe('runReadTool', () => {
     const outcome = await runReadTool({ path: 'src/service.ts' }, deps({
       readFile: async () => raw,
       symbols: async () => [{
-        name: 'Service', detail: '', start: 1, end: 62,
-        children: [{ name: 'run', detail: '(): void', start: 2, end: 61, children: [] }],
+        name: 'Service', detail: '', column: 0, start: 1, end: 62,
+        children: [{ name: 'run', detail: '(): void', column: 0, start: 2, end: 61, children: [] }],
       }],
       tokenBudget: 120,
       countTokens: async (text: string) => Math.ceil(text.length / 3.5),

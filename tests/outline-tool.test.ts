@@ -106,9 +106,9 @@ describe('outline honesty', () => {
         (_, i) => `  run${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
       ).join('\n'),
       symbols: async () => [{
-        name: 'Service', detail: '', start: 1, end: 120,
+        name: 'Service', detail: '', column: 0, start: 1, end: 120,
         children: Array.from({ length: 40 }, (_, i) => ({
-          name: `run${i}`, detail: '', start: i * 3 + 1, end: i * 3 + 3, children: [],
+          name: `run${i}`, detail: '', column: 0, start: i * 3 + 1, end: i * 3 + 3, children: [],
         })),
       }],
     });

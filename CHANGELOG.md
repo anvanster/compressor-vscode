@@ -96,6 +96,26 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- Outlines and complete-structure listings now mark declarations that are
+  visible outside their file with a leading `*`, and explain the mark in their
+  own preamble whenever one appears. An outline previously listed every symbol
+  the language provider reported with nothing to separate a module-local helper
+  from the file's public surface, and models read the whole list as the API:
+  `resolveProject`, a module-local variable, and `describeSteering`, internal to
+  its file, were both reported as part of the extension's public interface.
+  The provider cannot supply this — `SymbolTag` has one member, `Deprecated` —
+  so the mark is read from the declaration line: `export`, `pub`, a capitalised
+  Go name, an absent Python underscore, `public`, and for C and C++ the absence
+  of file-scope `static` or an enclosing anonymous namespace. It is inherited,
+  so a public method of a class the file never exports stays unmarked, and
+  languages without a rule are left unmarked with no preamble claiming
+  otherwise. Verified against the compiler for both families: symbol positions
+  from the TypeScript compiler over five of this extension's own files agree
+  with their `export` lines exactly, and every file-scope verdict on a compiled
+  C++ translation unit agrees with `nm`'s own internal/external linkage.
+  The mark reports declared visibility, not linkage: a `private:` C++ member
+  has external linkage but is not marked, which is the distinction a caller
+  reading the outline needs.
 - Two error messages that sent callers away from the tools. A workspace root, or
   `.`, was reported as "outside the open workspace folder(s)" — the root was
   excluded from its own containment check — and a directory was reported as

@@ -9,7 +9,7 @@ import { recordEvent } from '../ledger';
 import type { Mode } from '@astudioplus/compressor';
 import { readCandidate, selectOutput, fitOutput } from './output-policy';
 import type { OutputHints } from './output-policy';
-import { documentSymbols, flattenSymbols, formatSymbols } from './symbols';
+import { documentSymbols, exportLegend, flattenSymbols, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { measureOperation } from '../operation-metrics';
 
@@ -126,6 +126,7 @@ export async function completeStructure(
   absPath: string,
   requested: string,
   deps: ReadToolDeps,
+  lines: readonly string[] = [],
 ): Promise<string | undefined> {
   let symbols: CodeSymbol[];
   try {
@@ -134,11 +135,13 @@ export async function completeStructure(
     return undefined;
   }
   if (symbols.length === 0) return undefined;
+  const body = formatSymbols(symbols, { path: absPath, lines });
   return `[compressor: ${requested} does not fit the budget. COMPLETE list of its ` +
     'declarations follows: every symbol the language provider reported for the file is here, ' +
-    'nothing dropped to fit the budget. Bodies are not included — read one with ' +
+    'nothing dropped to fit the budget. ' + exportLegend(body) +
+    'Bodies are not included — read one with ' +
     `compressor_read ${requested} offset=N limit=M.]\n` +
-    formatSymbols(symbols);
+    body;
 }
 
 /**
@@ -286,7 +289,7 @@ export async function runReadTool(
     if (budgeted) {
       // prefer a complete structure over a truncated prefix; only when no
       // symbol provider can describe the file do we fall back to cutting it
-      const structure = await completeStructure(resolved.absPath, input.path, deps);
+      const structure = await completeStructure(resolved.absPath, input.path, deps, allLines);
       const fitted = structure === undefined
         ? undefined
         : await fitOutput(structure, deps, `read compressor_outline ${input.path} instead`);
