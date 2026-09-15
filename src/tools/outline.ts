@@ -80,6 +80,24 @@ export async function runOutlineTool(
     }
     const numbered = numberLines(allLines, 1);
     const budgeted: ReadToolDeps = { ...deps, tokenBudget: effectiveBudget(deps.mode, deps.tokenBudget) };
+    // The budget is a cap on every path of this tool, including the degenerate
+    // one where it cannot fit even a recovery marker and fitOutput answers ''.
+    // Falling back to the uncapped text there skipped the cap in the one case
+    // it was needed most — a 20-token request answered with the whole listing.
+    // compressor_read already answers that regime with a short notice; this is
+    // the same notice, not a second mechanism.
+    const cap = async (
+      text: string,
+      recovery = `read a range with compressor_read ${input.path} offset=N limit=M`,
+    ): Promise<string> => {
+      const fitted = await fitOutput(text, budgeted, recovery);
+      if (fitted !== '') return fitted;
+      const notice =
+        `[compressor: ${input.path} omitted; the budget cannot fit a recovery marker. ` +
+        `Read a range with compressor_read ${input.path} offset=N limit=M]`;
+      // A notice longer than the thing it stands in for helps nobody.
+      return notice.length < text.length ? notice : text;
+    };
     if (deps.cancelled?.()) throw new Error('Operation cancelled');
     let symbols: CodeSymbol[];
     try { symbols = await (deps.symbols ?? (deps.readFile ? async () => [] : documentSymbols))(resolved.absPath); }
@@ -95,7 +113,7 @@ export async function runOutlineTool(
         'Read a range with compressor_read before describing what any of it does.\n';
       const head = preamble(exportLegend(body));
       const formatted = head + body.text;
-      const capped = await fitOutput(formatted, budgeted, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
+      const capped = await cap(formatted, 'use compressor_read with offset/limit to inspect the remaining source');
       // The legend is settled a second time against the listing that survived
       // the cap, by rebuilding the preamble this code composed. A file whose
       // marks all sit below the cut would otherwise ship "unmarked names are
@@ -109,10 +127,7 @@ export async function runOutlineTool(
       // a symbol per key, so the outline of a package.json is larger than the
       // file, and the source it falls back to is a whole file.
       const selected = await selectOutput(numbered, candidate, budgeted);
-      const content = await fitOutput(
-        selected, budgeted,
-        `read a range with compressor_read ${input.path} offset=N limit=M`,
-      ) || candidate;
+      const content = await cap(selected);
       if (content !== numbered) {
         void recordEvent({
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
@@ -139,12 +154,6 @@ export async function runOutlineTool(
     // so the instruction is unfollowable there; point at this tool instead, and
     // keep the workspace-relative path the model already used.
     result.content = retargetMarkers(result.content, resolved.absPath, input.path);
-    // The budget is a cap on this tool, not on one of its paths. A host that
-    // sends no tokenizationOptions still gets the backstop, and a file with no
-    // provider still gets it, or the host spills the whole file and the model
-    // re-reads the spill.
-    const cap = async (text: string): Promise<string> =>
-      await fitOutput(text, budgeted, `read a range with compressor_read ${input.path} offset=N limit=M`) || text;
     if (result.content !== numbered && await selectOutput(numbered, result.content, budgeted) === numbered) {
       const text = await cap(numbered);
       if (text === numbered) return { text, isError: false, outlined: false };

@@ -427,3 +427,70 @@ describe('the budget is a cap, not a preference', () => {
     expect(events[0]?.transforms).toEqual(['symbol-outline']);
   });
 });
+
+// A budget smaller than the recovery marker is still a budget. fitOutput
+// answers '' there, and the `|| <uncapped>` fallbacks then handed back the
+// full listing: the one regime where the cap matters most was the one it was
+// skipped in, and a 20-token request was answered with a 213-token listing.
+// compressor_read already returns a short notice in the same regime.
+describe('a budget below the size of a recovery marker', () => {
+  const COUNT = 40;
+  const SOURCE = [
+    ...Array.from({ length: COUNT }, (_, i) => `function internalHelperNumber${i}() {}`),
+    'export function shownAtTheEnd() {}',
+  ].join('\n');
+  const SYMBOLS = async (): Promise<CodeSymbol[]> => [
+    ...Array.from({ length: COUNT }, (_, i) => ({
+      name: `internalHelperNumber${i}`, detail: '(): void', kind: SymbolKind.Function,
+      column: 9, declLine: i + 1, start: i + 1, end: i + 1, children: [],
+    })),
+    {
+      name: 'shownAtTheEnd', detail: '(): void', kind: SymbolKind.Function,
+      column: 16, declLine: COUNT + 1, start: COUNT + 1, end: COUNT + 1, children: [],
+    },
+  ];
+  const countTokens = async (text: string): Promise<number> => Math.ceil(text.length / 4);
+
+  it('answers a listing with a short notice instead of the uncapped text', async () => {
+    const outcome = await runOutlineTool({ path: 'src/late.ts' }, deps(SOURCE, {
+      symbols: SYMBOLS, tokenBudget: 20, countTokens,
+    }));
+    expect(outcome.text).toContain('the budget cannot fit a recovery marker');
+    expect(outcome.text).toContain('src/late.ts');
+    expect(outcome.text).not.toContain('internalHelperNumber5');
+    expect(outcome.text.length).toBeLessThan(SOURCE.length);
+  });
+
+  it('applies the same notice on the no-provider skeleton path', async () => {
+    const source = Array.from({ length: 200 }, (_, i) => [
+      `def function_number_${i}(argument_one, argument_two):`,
+      '    value = argument_one + argument_two',
+      '    return value * 2',
+    ].join('\n')).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/big.py' }, deps(source, {
+      tokenBudget: 20, countTokens,
+    }));
+    expect(outcome.text).toContain('the budget cannot fit a recovery marker');
+    expect(outcome.text).not.toContain('function_number_5(');
+  });
+
+  it('keeps the file when the notice would be longer than it', async () => {
+    // A notice longer than the thing it stands in for helps nobody; this is
+    // the guard compressor_read already carries.
+    const outcome = await runOutlineTool({ path: 'src/x.ts' }, deps('export function x() {\n  return 1;\n}', {
+      tokenBudget: 1, countTokens,
+    }));
+    expect(outcome.text).toContain('return 1;');
+  });
+
+  it('leaves normal budgets capping as before', async () => {
+    for (const tokenBudget of [120, 400]) {
+      const outcome = await runOutlineTool({ path: 'src/late.ts' }, deps(SOURCE, {
+        symbols: SYMBOLS, tokenBudget, countTokens,
+      }));
+      expect(outcome.text).toContain('[compressor: partial output;');
+      expect(outcome.text).not.toContain('the budget cannot fit a recovery marker');
+      expect(await countTokens(outcome.text)).toBeLessThanOrEqual(tokenBudget);
+    }
+  });
+});
