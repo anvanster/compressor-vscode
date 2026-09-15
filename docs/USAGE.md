@@ -89,15 +89,18 @@ Open src/engine/index.ts and walk me through compress().
 Returned content keeps original line numbers. Source code and comments are
 preserved; repeated log lines may collapse into a marker with an exact
 `offset`/`limit` recovery range. A tool invocation labeled “compressed” does not
-mean the response actually shrank. Whole-file reads can honor a host budget;
-explicit ranges and symbol reads remain exact.
+mean the response actually shrank. Every read is bounded by a token budget —
+the host's when it sends one, a built-in backstop when it does not. An explicit
+range or symbol read is exact as far as it goes and then stops, saying which
+lines it returned.
 
 When a whole file does not fit the host's budget, the reply degrades in detail
 rather than in coverage: if a symbol provider can describe the file, you get the
-**complete** list of its declarations (no bodies, nothing dropped to fit), and
-the next step is one named range. Otherwise the trimmed output names the
-`offset` to continue from. A range that stops short of the end of the file is
-labeled with the lines shown out of the file's total.
+**complete** list of its declarations (no bodies, nothing dropped to fit,
+carrying the same `*` visibility marks an outline uses), and the next step is
+one named range. Otherwise the trimmed output names the `offset` to continue
+from. A range that stops short of the end of the file is labeled with the lines
+shown out of the file's total.
 
 ### Find things with `#compressorSearch`
 
@@ -161,6 +164,41 @@ methods, details and exact ranges. Without a provider, a basic outline fallback
 supports TypeScript/JavaScript, Rust, Python and Go. Provider availability varies
 by language extension; an outline is not guaranteed to contain every symbol.
 
+A leading `*` marks a declaration that is visible outside its file, or outside
+its class for a member, and the outline says so in its own preamble whenever it
+marks anything.
+Read the preamble for a second sentence: only when it says unmarked names are
+internal was every symbol in that listing judged, and only then does a missing
+`*` mean the name is not part of the API. When the preamble explains just what
+`*` means, some symbols were not evaluated at all and nothing follows from the
+absence of a mark.
+The mark is read from the declaration line — `export`, `pub`, a capitalised Go
+name, an absent Python underscore, `public` for Java and C#, the absence of
+`private`/`protected`/`internal` for Kotlin, Scala and Groovy, and for C and C++
+the absence of file-scope `static` or an anonymous namespace — so it is a hint
+rather than a guarantee, and it is inherited: a public method of a class the
+file never exports is not marked.
+Only a type-like symbol's members are considered; what a function declares
+inside itself is a local, and no local is ever marked.
+What a container does to the names inside it depends on the container: an
+interface method or an enum constant carries no keyword of its own, so it is
+marked with its container unless it writes `private` or `protected`; a
+namespace member is judged as if it stood at file scope; and a Rust `impl`
+block is a grouping rather than a scope, so it is never marked itself and its
+items are judged by the file-scope `pub` rule.
+That last one has a known cost: a `pub` item in an `impl` on a file-private
+type is marked even though nothing outside the file can reach it, because one
+declaration line cannot say which type an `impl` is for.
+A C or C++ member is read from the access section it sits in, found by walking
+outward to the enclosing type and skipping the line ranges of that type's other
+children — so a nested type's own `public:` does not govern the member after it.
+An access label counts only at the start of its line, so one written inside a
+comment is ignored; the cost is that an inline label in a one-line class
+(`class T { void a(); public: void b(); };`) is not read either, and `b` falls
+back to the class default and is under-marked.
+Languages without a rule are left unmarked entirely, and no preamble claims
+otherwise.
+
 ```
 Outline #compressorOutline src/engine/index.ts, then read the body of compress()
 with #compressorRead at the offset/limit the marker shows.
@@ -178,7 +216,11 @@ Symbol names must resolve uniquely. Do not combine `symbol` with `offset` or
 ### Reading an exact range
 
 When you (or the agent) need a span verbatim, pass `offset` (1-based start line)
-and `limit` (line count) — that range comes back uncompressed:
+and `limit` (line count) — that range comes back verbatim as far as it goes.
+It is still bounded by the token budget: an oversized range stops short, states
+the lines it actually returned, and names the offset to resume from.
+Raising `limit` past that point returns the same bytes, because the budget
+bounds the output and the limit does not.
 
 ```
 Read #compressorRead src/engine/tiers/logs.ts lines 40 to 80 and quote the

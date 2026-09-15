@@ -23,8 +23,9 @@ the network.
   - **`#compressorRead`** — preserves source code, comments and line numbers;
     repeated log lines can be deduplicated with recoverable
     `[compressor:]` markers stating the exact `offset`/`limit` to retrieve
-    omitted lines. Pass `offset`/`limit` or a unique qualified `symbol` for an
-    exact uncompressed read.
+    omitted lines. Pass `offset`/`limit` or a unique qualified `symbol` for a
+    verbatim range; it stops at the token budget and names the line to resume
+    from.
   - **`#compressorSearch`** — workspace text/regex search returning compressed
     grep-style results (file, line, match). Accepts `isRegex`, `ignoreCase`,
     an `include` glob, `root`, `maxResults`, `skip`, compact `output=files|count`,
@@ -33,8 +34,11 @@ the network.
     Partial scans are labeled; budget-trimmed pages advance only past represented
     matches. Counts and continuation exclude context lines.
   - **`#compressorOutline`** — provider-backed symbols, nested methods and exact
-    ranges, with a basic TS/JS, Python, Rust or Go fallback. Read implementation
-    with `#compressorRead` using a qualified symbol or line range.
+    ranges, with a basic TS/JS, Python, Rust or Go fallback. A leading `*` marks
+    a declaration found to be visible outside its file, explained in the
+    listing's own preamble; the [usage guide](docs/USAGE.md) states what the mark
+    does and does not promise. Read implementation with `#compressorRead` using a
+    qualified symbol or line range.
   - **`#compressorExecute`** — confirmed noninteractive commands with exit status,
     time/output limits, summaries and a retained log ID. The **Compressor Commands**
     Output channel shows captured output. Commands are not sandboxed. A command

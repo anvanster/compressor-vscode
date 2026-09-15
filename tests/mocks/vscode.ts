@@ -9,6 +9,17 @@ export class ThemeColor {
   constructor(public readonly id: string) {}
 }
 export const ViewColumn = { One: 1, Two: 2, Active: -1 } as const;
+
+// Numeric values are part of the protocol, not an implementation detail: they
+// must match vscode.SymbolKind exactly or a symbol a test builds is a
+// different kind than the one src reads.
+export enum SymbolKind {
+  File = 0, Module = 1, Namespace = 2, Package = 3, Class = 4, Method = 5,
+  Property = 6, Field = 7, Constructor = 8, Enum = 9, Interface = 10,
+  Function = 11, Variable = 12, Constant = 13, String = 14, Number = 15,
+  Boolean = 16, Array = 17, Object = 18, Key = 19, Null = 20, EnumMember = 21,
+  Struct = 22, Event = 23, Operator = 24, TypeParameter = 25,
+}
 export const ConfigurationTarget = { Global: 1, Workspace: 2, WorkspaceFolder: 3 } as const;
 
 interface DisposableLike {

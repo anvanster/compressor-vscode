@@ -68,7 +68,7 @@ export function userAgentPath(home: string = os.homedir()): string {
  * install should pick up. Stamped into owned files so an install can say what
  * it replaced, and so `status` can name the revision on disk.
  */
-export const STEERING_REVISION = 3;
+export const STEERING_REVISION = 8;
 
 const OWNED_MARKER_PREFIX = '<!-- compressor-vscode:owned';
 const OWNED_MARKER_RE = /<!-- compressor-vscode:owned v=(\d+) -->/;
@@ -122,7 +122,8 @@ available in this agent. Read and search like this:
 
 - **\`compressorOutline\`** — call this first on any source file longer than
   ~200 lines to see its shape (top-level imports + signatures, bodies collapsed)
-  before reading bodies. Supports TS/JS, Python, Rust, and Go.
+  before reading bodies. Works in any language VS Code has a symbol provider
+  for; without one it falls back to a basic TS/JS, Python, Rust or Go outline.
 - **\`compressorRead\`** — read relevant \`offset\`/\`limit\` ranges or qualified
   \`symbol\` names. Whole-file reads suit small files or broad edits.
 - **\`compressorSearch\`** — find where something is defined or used (supports a
@@ -137,8 +138,10 @@ Always inspect exit status. Use \`compressorLog\` to retrieve omitted output
 instead of rerunning commands. Do not use execution to bypass file boundaries.
 Never use it to print a file (\`cat\`, \`head\`, \`sed -n\`): command output is
 summarized for diagnostics, so a file read that way comes back sampled rather
-than whole. \`compressorRead\` returns the range you asked for and states its
-coverage. Editing files works normally.
+than whole. \`compressorRead\` returns the range you asked for, verbatim as far as it
+goes, and states the lines it actually returned; a range too large for the
+budget stops short, and raising \`limit\` returns the same bytes rather than
+more of them. Editing files works normally.
 
 ## State only what the tools actually returned
 
@@ -157,6 +160,18 @@ obey it literally.
   does.
 - \`signatures only, bodies omitted\` is a shape, not an implementation. Names
   are not evidence of behaviour.
+- A preamble explaining \`*\` means that result marks the declarations the tools
+  read as visible outside their file, or outside their class for a member. The
+  mark is read from the declaration line, so a missing \`*\` means "not shown
+  to be public", not proof that nothing else can reach it.
+  Read the preamble for a second sentence about unmarked names. Only when it
+  says unmarked names are internal has every symbol in that listing been
+  judged; treat the unmarked ones as internal and do not present them as public
+  API. When the preamble explains only what \`*\` means, some symbols were not
+  judged at all — the properties of an exported object literal, for one — so
+  say nothing about the unmarked names either way.
+  A result with no such preamble marks nothing, so say nothing about what it
+  exports.
 - A \`[compressor: ...]\` marker always names the exact call that retrieves what
   it left out. Make that call. Do not substitute a different tool.
 

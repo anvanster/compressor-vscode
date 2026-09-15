@@ -7,9 +7,9 @@ import {
 } from '@astudioplus/compressor';
 import { recordEvent } from '../ledger';
 import type { Mode } from '@astudioplus/compressor';
-import { readCandidate, selectOutput, fitOutput } from './output-policy';
+import { effectiveBudget, readCandidate, selectOutput, fitOutput, tokenCounter } from './output-policy';
 import type { OutputHints } from './output-policy';
-import { documentSymbols, flattenSymbols, formatSymbols } from './symbols';
+import { documentSymbols, exportLegend, flattenSymbols, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { measureOperation } from '../operation-metrics';
 
@@ -21,9 +21,9 @@ import { measureOperation } from '../operation-metrics';
 export interface ReadToolInput {
   path: string;
   symbol?: string;
-  /** 1-based start line for an exact uncompressed range */
+  /** 1-based start line for a verbatim range; the range still stops at the budget */
   offset?: number;
-  /** line count for the exact range */
+  /** line count for the verbatim range */
   limit?: number;
 }
 
@@ -68,10 +68,12 @@ export function resolveWorkspacePath(
     : path.normalize(path.join(folders[0] ?? '', requested));
   // a spilled tool result: our own output, handed back by VS Code
   if (isChatSessionResource(candidate)) return { absPath: candidate };
-  const inside = folders.some((folder) => {
-    const rel = path.relative(folder, candidate);
-    return rel !== '' && containsPath(folder, candidate);
-  });
+  // A workspace root is inside the workspace. Excluding it here reported the
+  // root, and `.`, as "outside the open workspace folder(s)" — which a model
+  // reasonably reads as "this tool cannot see my project", and then answers
+  // from filenames instead of calling the tool again. Directories are rejected
+  // further down, by the check that knows they are directories.
+  const inside = folders.some((folder) => containsPath(folder, candidate));
   if (!inside) {
     return {
       error:
@@ -124,6 +126,7 @@ export async function completeStructure(
   absPath: string,
   requested: string,
   deps: ReadToolDeps,
+  lines: readonly string[],
 ): Promise<string | undefined> {
   let symbols: CodeSymbol[];
   try {
@@ -132,11 +135,13 @@ export async function completeStructure(
     return undefined;
   }
   if (symbols.length === 0) return undefined;
+  const body = formatSymbols(symbols, { path: absPath, lines });
   return `[compressor: ${requested} does not fit the budget. COMPLETE list of its ` +
     'declarations follows: every symbol the language provider reported for the file is here, ' +
-    'nothing dropped to fit the budget. Bodies are not included — read one with ' +
+    'nothing dropped to fit the budget. ' + exportLegend(body) +
+    'Bodies are not included — read one with ' +
     `compressor_read ${requested} offset=N limit=M.]\n` +
-    formatSymbols(symbols);
+    body.text;
 }
 
 /**
@@ -166,7 +171,17 @@ export function rangeNote(start: number, shown: number, total: number): string {
  * `skip=`. The rewrite is kept no longer than the marker it replaces, so the
  * output still fits the budget it was just trimmed to.
  */
-export function withResumePoint(trimmed: string): string {
+/** The highest line number still present in numbered output. */
+export function lastNumberedLine(text: string): number | undefined {
+  const lines = text.split('\n');
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const numbered = /^\s*(\d+)→/.exec(lines[index] ?? '');
+    if (numbered !== null) return Number(numbered[1]);
+  }
+  return undefined;
+}
+
+export function withResumePoint(trimmed: string, tail = 'or compressor_outline for the shape of the rest'): string {
   const lines = trimmed.split('\n');
   const marker = lines.findIndex((line) => line.startsWith('[compressor: partial output;'));
   if (marker < 0) return trimmed;
@@ -174,8 +189,7 @@ export function withResumePoint(trimmed: string): string {
     const numbered = /^\s*(\d+)→/.exec(lines[index] ?? '');
     if (numbered === null) continue;
     const replacement =
-      `[compressor: partial output; continue with offset=${Number(numbered[1]) + 1}, ` +
-      'or compressor_outline for the shape of the rest]';
+      `[compressor: partial output; continue with offset=${Number(numbered[1]) + 1}, ${tail}]`;
     if (replacement.length > (lines[marker] ?? '').length) return trimmed;
     lines[marker] = replacement;
     return lines.join('\n');
@@ -276,18 +290,52 @@ export async function runReadTool(
     // returned even when the saving is small, and a budget too small for a
     // recovery marker yields a short notice rather than the whole file.
     const candidate = targeted ? numbered : readCandidate(allLines, resolved.absPath, deps.mode, false);
-    const reduced = await selectOutput(numbered, candidate, deps);
-    let capped = targeted || deps.mode === 'full'
+    // An absent host budget is not an absent cap: see effectiveBudget. The cap
+    // applies to an explicit offset/limit too. Exempting those looked like it
+    // preserved a verbatim range, but the host spills any result over its own
+    // inline limit to a file, so an oversized range was never reaching the
+    // model verbatim — it arrived as a path to re-read, and that read spilled
+    // in turn. An honest short range beats a long one the caller cannot see.
+    // The note is prepended after capping, so its cost has to come out of the
+    // budget rather than be added on top of it — a cap that overshoots by the
+    // width of its own coverage line is the thing that makes a host spill.
+    // Sizing it from the requested range alone under-reserves: rangeNote drops
+    // its resume clause when the whole range fits, so the note that ships after
+    // a cap is the longer of the two forms. Reserve the widest it can become.
+    const base = effectiveBudget(deps.mode, deps.tokenBudget);
+    const widestNote = [slice.length, slice.length - 1, 1]
+      .filter((shown) => shown >= 1)
+      .map((shown) => rangeNote(start, shown, allLines.length))
+      .reduce((longest, note) => (note.length > longest.length ? note : longest), '');
+    const reserve = targeted && base !== undefined && widestNote !== ''
+      ? await tokenCounter(deps)(`${widestNote}\n`)
+      : 0;
+    const capDeps: ReadToolDeps = {
+      ...deps,
+      tokenBudget: base === undefined ? undefined : Math.max(1, base - reserve),
+    };
+    const reduced = await selectOutput(numbered, candidate, capDeps);
+    // Observed: the model answered a capped read by re-requesting offset=1 with
+    // limit raised 400 -> 2000 -> 4000, receiving the same bytes each time,
+    // because the budget bounds the output and the limit does not.
+    const RAISING_LIMIT = 'a larger limit returns the same bytes, because the budget caps this output';
+    let capped = deps.mode === 'full'
       ? reduced
-      : await fitOutput(reduced, deps, 'use compressor_read with offset/limit for the lines you still need, or compressor_outline');
+      : await fitOutput(reduced, capDeps, targeted
+        ? `advance the offset to continue; ${RAISING_LIMIT}`
+        : 'use compressor_read with offset/limit for the lines you still need, or compressor_outline');
     let budgeted = capped !== reduced;
-    if (budgeted) {
+    if (budgeted && targeted) {
+      // The caller asked for a specific range; answer with as much of that
+      // range as fits and where to resume, not with a different view of it.
+      if (capped !== '') capped = withResumePoint(capped, RAISING_LIMIT);
+    } else if (budgeted) {
       // prefer a complete structure over a truncated prefix; only when no
       // symbol provider can describe the file do we fall back to cutting it
-      const structure = await completeStructure(resolved.absPath, input.path, deps);
+      const structure = await completeStructure(resolved.absPath, input.path, deps, allLines);
       const fitted = structure === undefined
         ? undefined
-        : await fitOutput(structure, deps, `read compressor_outline ${input.path} instead`);
+        : await fitOutput(structure, capDeps, `read compressor_outline ${input.path} instead`);
       if (fitted !== undefined && fitted !== '' && fitted === structure) {
         capped = structure;
         budgeted = true;
@@ -305,11 +353,22 @@ export async function runReadTool(
     const saved = numbered.length - content.length;
     const worthwhile =
       saved >= MIN_SAVED_CHARS && saved >= numbered.length * MIN_SAVED_RATIO;
+    // Leads the output: a model that stops reading partway through a result
+    // still sees how much of the file it was given. Metadata about coverage,
+    // never counted as a reduction. Counted from the text actually returned,
+    // so a capped range reports the lines it kept rather than the lines asked
+    // for — the whole point of the note is that it cannot overstate coverage.
+    const shown = (text: string): string => {
+      if (!targeted) return '';
+      // No numbered line means no line of the file was returned — the budget
+      // left room for the notice only. There is no coverage to state, and the
+      // requested range is exactly the claim that would be false.
+      const end = lastNumberedLine(text);
+      if (end === undefined) return '';
+      return rangeNote(start, Math.max(0, end - start + 1), allLines.length);
+    };
     if (content === numbered || (!budgeted && !worthwhile)) {
-      // Leads the output: a model that stops reading partway through a result
-      // still sees how much of the file it was given. Metadata about coverage,
-      // never counted as a reduction.
-      const note = targeted ? rangeNote(start, slice.length, allLines.length) : '';
+      const note = shown(numbered);
       return { text: note === '' ? numbered : `${note}\n${numbered}`, isError: false, compressed: false };
     }
 
@@ -328,7 +387,8 @@ export async function runReadTool(
       }).catch(() => {});
     }
 
-    return { text: content, isError: false, compressed: true };
+    const note = shown(content);
+    return { text: note === '' ? content : `${note}\n${content}`, isError: false, compressed: true };
   } catch (error) {
     // never throw raw out of a tool invocation
     const reason = error instanceof Error ? error.message : String(error);

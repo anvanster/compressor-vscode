@@ -107,7 +107,7 @@
                         "slim"
                     ],
                     "default": "optimized",
-                    "description": "Read/search policy: full disables automatic compression; optimized/slim preserve source code and comments, collapse repeated log lines and bound search results. Explicit outline and execution tools still summarize. Exact ranges stay uncompressed; optional host budgets can bound whole-file results. Figures measure gross output reduction, not session savings."
+                    "description": "Read/search policy: full disables automatic compression; optimized/slim preserve source code and comments, collapse repeated log lines and bound search results. Explicit outline and execution tools still summarize. An exact range is returned verbatim but stops at the token budget, and every result is bounded by one: the host's when it sends one, a built-in backstop when it does not. Figures measure gross output reduction, not session savings."
                 },
                 "compressor.showActualUsage": {
                     "type": "boolean",
@@ -165,7 +165,7 @@
                 "toolReferenceName": "compressorRead",
                 "displayName": "Compressed File Read",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Read workspace text with original line numbers. Source code and comments are preserved; repeated log lines may be collapsed with recovery ranges. Prefer relevant offset/limit ranges or a qualified symbol name. Use compressor_outline to discover symbols. Exact ranges and symbols are uncompressed. Whole-file reads suit small files or broad edits. Canonical workspace paths, plus tool results VS Code spilled to its own chat-session-resources folder; regular text files up to 8 MB only.",
+                "modelDescription": "Read workspace text with original line numbers. Source code and comments are preserved; repeated log lines may be collapsed with recovery ranges. Prefer relevant offset/limit ranges or a qualified symbol name. Use compressor_outline to discover symbols. An exact range or symbol is returned verbatim as far as it goes, but it still stops at the budget and says the lines it actually returned; raising limit past that point returns the same bytes. Whole-file reads suit small files or broad edits. Canonical workspace paths, plus tool results VS Code spilled to its own chat-session-resources folder; regular text files up to 8 MB only.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -176,7 +176,7 @@
                         "offset": {
                             "type": "integer",
                             "minimum": 1,
-                            "description": "1-based start line for an exact uncompressed range"
+                            "description": "1-based start line for a verbatim range; the range still stops at the token budget"
                         },
                         "limit": {
                             "type": "integer",
@@ -248,7 +248,7 @@
                 "toolReferenceName": "compressorOutline",
                 "displayName": "Code Outline",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
+                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. When the preamble explains a leading *, that mark names declarations found to be visible outside the file. Only when the preamble also says unmarked names are internal was every symbol judged; otherwise some were not evaluated - an exported object literal's properties, for one - and nothing follows from a missing mark. A language with no visibility rule carries neither the mark nor the preamble. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -6,7 +6,7 @@ import { recordEvent } from '../ledger';
 import type { Mode } from '@astudioplus/compressor';
 import { normalizeMode } from './read';
 import { containsPath } from './workspace-file';
-import { fitOutput, tokenCounter } from './output-policy';
+import { effectiveBudget, fitOutput, tokenCounter } from './output-policy';
 import type { OutputHints } from './output-policy';
 import { measureOperation } from '../operation-metrics';
 import { RegexScanner } from './regex-scanner';
@@ -67,7 +67,6 @@ const MAX_FILE_BYTES = 2_000_000;
  * line carries a distinct number prefix. Bounding happens here instead, in
  * whole matches, using the skip= contract this tool actually honours.
  */
-const DEFAULT_TOKEN_BUDGET: Record<Exclude<Mode, 'full'>, number> = { optimized: 5_000, slim: 2_500 };
 
 interface SearchBudget {
   tokens: number;
@@ -76,20 +75,18 @@ interface SearchBudget {
 }
 
 /**
- * Full mode is never budget-trimmed. Otherwise a usable host budget wins, and
- * DEFAULT_TOKEN_BUDGET is the backstop for hosts that supply none: optimized
- * keeps the magnitude of the engine's former truncateBudget so output size is
- * materially unchanged, and slim halves it, mirroring the library's own
- * optimized:slim ratio for touch and commentStrip. The library's note rejecting
- * a tighter read budget does not transfer here - it was measured against
- * offset/limit re-reads of the same content, whereas search pages forward
- * through skip= to matches it has not yet delivered.
+ * `effectiveBudget` owns the policy — full mode untrimmed, a usable host budget
+ * otherwise, a per-mode backstop when the host sends none. All this adds is the
+ * ledger label naming which of the two the number came from. The library's note
+ * rejecting a tighter read budget does not transfer here: it was measured
+ * against offset/limit re-reads of the same content, whereas search pages
+ * forward through skip= to matches it has not yet delivered.
  */
 function budgetFor({ mode, tokenBudget }: SearchToolDeps): SearchBudget | undefined {
-  if (mode === 'full') return undefined;
-  return tokenBudget !== undefined && Number.isFinite(tokenBudget) && tokenBudget > 0
-    ? { tokens: tokenBudget, source: 'host-budget' }
-    : { tokens: DEFAULT_TOKEN_BUDGET[mode], source: 'search-page' };
+  const tokens = effectiveBudget(mode, tokenBudget);
+  return tokens === undefined
+    ? undefined
+    : { tokens, source: tokens === tokenBudget ? 'host-budget' : 'search-page' };
 }
 
 /** Budget predicate sharing the read path's counter and cancellation. */

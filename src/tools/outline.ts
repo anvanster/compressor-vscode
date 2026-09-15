@@ -9,9 +9,9 @@ import type { CompressMeta } from '@astudioplus/compressor';
 import { normalizeMode, numberLines, readFailure, resolveWorkspacePath } from './read';
 import type { ReadToolDeps } from './read';
 import { recordEvent } from '../ledger';
-import { documentSymbols, formatSymbols } from './symbols';
+import { documentSymbols, exportLegend, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
-import { selectOutput, fitOutput } from './output-policy';
+import { effectiveBudget, selectOutput, fitOutput } from './output-policy';
 import { measureOperation } from '../operation-metrics';
 
 // The compressor_outline languageModelTools tool: returns a code file's
@@ -79,6 +79,25 @@ export async function runOutlineTool(
       allLines.pop();
     }
     const numbered = numberLines(allLines, 1);
+    const budgeted: ReadToolDeps = { ...deps, tokenBudget: effectiveBudget(deps.mode, deps.tokenBudget) };
+    // The budget is a cap on every path of this tool, including the degenerate
+    // one where it cannot fit even a recovery marker and fitOutput answers ''.
+    // Falling back to the uncapped text there skipped the cap in the one case
+    // it was needed most — a 20-token request answered with the whole listing.
+    // compressor_read already answers that regime with a short notice; this is
+    // the same notice, not a second mechanism.
+    const cap = async (
+      text: string,
+      recovery = `read a range with compressor_read ${input.path} offset=N limit=M`,
+    ): Promise<string> => {
+      const fitted = await fitOutput(text, budgeted, recovery);
+      if (fitted !== '') return fitted;
+      const notice =
+        `[compressor: ${input.path} omitted; the budget cannot fit a recovery marker. ` +
+        `Read a range with compressor_read ${input.path} offset=N limit=M]`;
+      // A notice longer than the thing it stands in for helps nobody.
+      return notice.length < text.length ? notice : text;
+    };
     if (deps.cancelled?.()) throw new Error('Operation cancelled');
     let symbols: CodeSymbol[];
     try { symbols = await (deps.symbols ?? (deps.readFile ? async () => [] : documentSymbols))(resolved.absPath); }
@@ -88,17 +107,35 @@ export async function runOutlineTool(
       // reads like a complete description of the file, and a model will answer
       // questions about behaviour from names alone rather than reading the
       // ranges it was just handed.
-      const formatted = `${input.path}: signatures only, bodies omitted. ` +
-        'Read a range with compressor_read before describing what any of it does.\n' +
-        formatSymbols(symbols);
-      const candidate = await fitOutput(formatted, deps, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
-      const content = await selectOutput(numbered, candidate, deps);
+      const body = formatSymbols(symbols, { path: resolved.absPath, lines: allLines });
+      const preamble = (legend: string): string =>
+        `${input.path}: signatures only, bodies omitted. ${legend}` +
+        'Read a range with compressor_read before describing what any of it does.\n';
+      const head = preamble(exportLegend(body));
+      const formatted = head + body.text;
+      const capped = await cap(formatted, 'use compressor_read with offset/limit to inspect the remaining source');
+      // The legend is settled a second time against the listing that survived
+      // the cap, by rebuilding the preamble this code composed. A file whose
+      // marks all sit below the cut would otherwise ship "unmarked names are
+      // internal" over a listing with no marks left to exempt.
+      const listed = capped.startsWith(head) ? capped.slice(head.length) : undefined;
+      const candidate = listed !== undefined && exportLegend({ ...body, text: listed }) === ''
+        ? preamble('') + listed
+        : capped;
+      // The cap applies to whichever of the two is chosen. Selecting first and
+      // capping second matters when the outline loses: a JSON provider reports
+      // a symbol per key, so the outline of a package.json is larger than the
+      // file, and the source it falls back to is a whole file.
+      const selected = await selectOutput(numbered, candidate, budgeted);
+      const content = await cap(selected);
       if (content !== numbered) {
         void recordEvent({
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
           charsIn: numbered.length, charsOut: content.length,
           estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(content),
-          transforms: ['symbol-outline'],
+          // The listing lost to the source and the cap then cut it: what came
+          // back is trimmed source, not an outline.
+          transforms: [selected === numbered ? 'host-budget' : 'symbol-outline'],
         }).catch(() => {});
       }
       return { text: content, isError: false, outlined: content !== numbered };
@@ -117,32 +154,50 @@ export async function runOutlineTool(
     // so the instruction is unfollowable there; point at this tool instead, and
     // keep the workspace-relative path the model already used.
     result.content = retargetMarkers(result.content, resolved.absPath, input.path);
-    if (result.content !== numbered && await selectOutput(numbered, result.content, deps) === numbered) {
-      return { text: numbered, isError: false, outlined: false };
+    if (result.content !== numbered && await selectOutput(numbered, result.content, budgeted) === numbered) {
+      const text = await cap(numbered);
+      if (text === numbered) return { text, isError: false, outlined: false };
+      void recordEvent({
+        ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
+        charsIn: numbered.length, charsOut: text.length,
+        estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(text),
+        transforms: ['host-budget'],
+      }).catch(() => {});
+      return { text, isError: false, outlined: true };
     }
     if (result.content === numbered || result.transform === undefined) {
       // signature model exists but produced no collapse (tiny file, or all
       // top-level declarations) — the full numbered file IS the outline
-      return {
-        text: `compressor_outline: ${input.path} is already all signatures — full file below\n${numbered}`,
-        isError: false,
-        outlined: false,
-      };
+      const head = `compressor_outline: ${input.path} is already all signatures — full file below\n`;
+      const whole = head + numbered;
+      const capped = await cap(whole);
+      if (capped === whole) return { text: whole, isError: false, outlined: false };
+      // The budget cut the listing, so "full file below" is no longer true.
+      // The recovery marker the cap appended says what was returned instead.
+      const text = capped.startsWith(head) ? capped.slice(head.length) : capped;
+      void recordEvent({
+        ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
+        charsIn: numbered.length, charsOut: text.length,
+        estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(text),
+        transforms: ['host-budget'],
+      }).catch(() => {});
+      return { text, isError: false, outlined: true };
     }
 
+    const text = await cap(result.content);
     void recordEvent({
       ts: new Date().toISOString(),
       agent: 'vscode',
       tool: 'read',
       mode: deps.mode,
       charsIn: numbered.length,
-      charsOut: result.content.length,
+      charsOut: text.length,
       estTokensIn: cheapEstimator(numbered),
-      estTokensOut: cheapEstimator(result.content),
+      estTokensOut: cheapEstimator(text),
       transforms: [result.transform.id],
     }).catch(() => {});
 
-    return { text: result.content, isError: false, outlined: true };
+    return { text, isError: false, outlined: true };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { text: `compressor_outline failed: ${reason}`, isError: true, outlined: false };

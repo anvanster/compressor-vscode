@@ -96,6 +96,98 @@
 - Expanded `#compressorSearch` with multi-root scoping, files/count modes,
   recoverable pagination, optional merged context windows, host-budget-aware
   complete-match pages, and cancellable regex workers with per-file deadlines.
+- **Fixed: an absent host budget was treated as no budget at all.**
+  `tokenizationOptions` is optional in the language-model tool API, and
+  `#compressorRead` and `#compressorOutline` passed the host's value straight
+  through, so a host that sent none got whole files back uncapped. Only
+  `#compressorSearch` had a backstop. Observed in Copilot: an outline of
+  `package.json` fell back to the source, because a JSON provider reports one
+  symbol per key and its outline is larger than the file; the uncapped source
+  overflowed the host's inline limit; VS Code spilled the result to a
+  chat-session resource file; the model read that file, and the read spilled in
+  turn. Nine calls, no file contents, and the model ended by asking the user
+  what it should summarize. The backstop is now shared by all three tools —
+  5,000 tokens in `optimized`, 2,500 in `slim` — and the cap now applies to
+  whichever of source or outline is selected, rather than only to the outline.
+  `full` mode is still never trimmed. When the budget cannot fit even a
+  recovery marker, `#compressorOutline` now answers with a short notice naming
+  the path instead of falling back to the uncapped listing, matching what
+  `#compressorRead` already did in that regime.
+- **Fixed: an explicit `offset`/`limit` was exempt from the budget.** The
+  exemption was meant to keep a range verbatim, so a read stays citable and
+  editable by line. The host disproves the premise: it spills any result over
+  its own inline limit to a chat-session resource file, so an oversized range
+  never reached the model verbatim anyway — it arrived as a path to re-read,
+  and that read spilled in turn. A range is still verbatim as far as it goes;
+  it now stops at the budget and says where to resume. Observed in Copilot: a
+  capped read was answered by re-requesting `offset=1` with the limit raised
+  400, then 2000, then 4000, receiving the same bytes each time, because the
+  budget bounds the output and the limit does not. The recovery marker now says
+  so outright. The coverage note counts the lines actually returned rather than
+  the lines requested, and its cost is reserved out of the budget instead of
+  added on top, since a cap that overshoots by the width of its own coverage
+  line is what makes a host spill in the first place.
+- Outlines and complete-structure listings now mark declarations that are
+  visible outside their file with a leading `*`, and explain the mark in their
+  own preamble whenever one appears. An outline previously listed every symbol
+  the language provider reported with nothing to separate a module-local helper
+  from the file's public surface, and models read the whole list as the API:
+  `resolveProject`, a module-local variable, and `describeSteering`, internal to
+  its file, were both reported as part of the extension's public interface.
+  The provider cannot supply this — `SymbolTag` has one member, `Deprecated` —
+  so the mark is read from the declaration line: `export`, `pub`, a capitalised
+  Go name, an absent Python underscore, `public`, and for C and C++ the absence
+  of file-scope `static` or an enclosing anonymous namespace. It is inherited,
+  so a public method of a class the file never exports stays unmarked, and
+  languages without a rule are left unmarked with no preamble claiming
+  otherwise. Verified against the compiler for both families: symbol positions
+  from the TypeScript compiler over five of this extension's own files agree
+  with their `export` lines exactly, and every file-scope verdict on a compiled
+  C++ translation unit agrees with `nm`'s own internal/external linkage.
+  A C or C++ member is read from the access section it sits in. The section is
+  found by walking outward to the enclosing type and stepping over the line
+  ranges of that type's other children, which the symbol provider already
+  reports — so a nested type's own `public:` governs its members and not the
+  member declared after it, and no brace counting is involved. An access label
+  counts only at the start of its line, which is what keeps one inside a
+  comment (`/// Not public: internal only.`) from deciding the member beneath
+  it; the cost is that an inline label in a one-line class is not read, and
+  those members fall back to the type's default and are under-marked.
+  `static` is recognised behind attributes, a template header and other
+  specifiers, so `inline static`, `[[nodiscard]] static` and `constexpr static`
+  are internal linkage rather than exported.
+  A listing that reaches symbols no rule judged says so: its preamble explains
+  what `*` means and stops, instead of adding that unmarked names are internal
+  — a claim that only holds when every symbol was judged. An exported object
+  literal is the case that needs it, since a provider reports its properties as
+  children of a kind that declares nothing and no rule runs on them.
+  Visibility is read from `selectionRange`, the name, rather than `range`:
+  `range` covers "everything else, e.g. comments and code", so for a documented
+  symbol it begins at the opening comment and a rule reading its first line
+  sees `/**` instead of the declaration. Caught only after a Copilot run still
+  called module-local helpers public API; checked against every source file in
+  this extension, where reading from `range` marked 0 of 170 exports and
+  reading from `selectionRange` marks all 170 and nothing else.
+  Steering now describes the mark alongside the other coverage markers, so an
+  unmarked symbol is not presented as public API, and says a missing `*` means
+  "not shown to be public" rather than proof of privacy, since a one-line read
+  under-marks rather than over-marks. The same pass corrects the agent's claim
+  that `compressorOutline` "Supports TS/JS, Python, Rust, and Go": that is the
+  no-provider fallback's list, and stating it as the tool's own capability
+  steered models away from outlining C++, Java and C# files that VS Code has a
+  symbol provider for. Steering revision is now v8; existing installs report as
+  out of date until re-run.
+- Two error messages that sent callers away from the tools. A workspace root, or
+  `.`, was reported as "outside the open workspace folder(s)" — the root was
+  excluded from its own containment check — and a directory was reported as
+  "Only regular text files up to 8 MB can be read", which reads as a size limit.
+  Observed together: a model outlined the workspace root, concluded from the
+  message that the extension could not see the project, and described the
+  repository from filenames rather than calling the tools again. A root now
+  resolves, and a directory says it is a directory and points at the files
+  inside it. `#compressorSearch` has no listing mode — it requires a query and
+  reports only the files that match one — so the message names a text search
+  scoped with `include=<dir>/**` rather than claiming a directory can be listed.
 - `COMPRESSOR_NO_LEDGER=1` stops the extension recording anything. The switch is
   read from the extension host's own environment, so it has to be set for the
   VS Code process itself; exporting it in an integrated terminal does not reach

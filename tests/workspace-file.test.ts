@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isChatSessionResource, containsPath, readWorkspaceFile, setChatResourceRoot } from '../src/tools/workspace-file';
+import { runSearchTool } from '../src/tools/search';
 
 it('rejects symlinks outside the workspace but permits internal targets', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'compressor-boundary-'));
@@ -75,3 +76,60 @@ describe('spilled tool results', () => {
   });
 });
 
+
+describe('unreadable targets name what is wrong', () => {
+  it('distinguishes a directory from a size limit', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'compressor-dirmsg-'));
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
+        .rejects.toThrow(/a directory, not a file/);
+      // a size message for a directory sends the caller looking for a big file
+      await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
+        .rejects.not.toThrow(/8 MB/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  // The message is a recovery instruction: a model follows it literally, so a
+  // call it names has to be one compressor_search accepts. The previous
+  // wording left out `query`, which the tool requires, spending a whole turn
+  // on `compressor_search: a query is required`.
+  it('names a compressor_search call that compressor_search accepts', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'compressor-dirmsg-call-'));
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await writeFile(path.join(dir, 'src', 'service.ts'), 'export const marker = 1;\n');
+      await writeFile(path.join(dir, 'elsewhere.ts'), 'export const unrelated = 2;\n');
+      const message = await readWorkspaceFile(path.join(dir, 'src'), [dir])
+        .then(() => '', (error: Error) => error.message);
+
+      // rebuild the suggested call out of the message rather than restating it
+      const suggested = /compressor_search \(([^)]*)\)/.exec(message);
+      expect(suggested, message).not.toBeNull();
+      const argument = (name: string): string | undefined =>
+        new RegExp(`\\b${name}=(\\S+?)(?:,|$)`).exec(suggested![1]!)?.[1];
+      expect(argument('query'), message).toBeDefined();
+
+      // Glob matching belongs to VS Code's findFiles, so this hands the tool
+      // both files and lets its own query matching decide. Asserting against a
+      // glob the test itself implemented would prove nothing about the tool.
+      const outcome = await runSearchTool({
+        query: 'marker',
+        include: argument('include')!.replace('<dir>', 'src'),
+        output: argument('output') as 'files' | undefined,
+      }, {
+        workspaceFolders: [dir],
+        mode: 'optimized',
+        findFiles: async () => ['src/service.ts', 'elsewhere.ts'].map((file) => path.join(dir, file)),
+      });
+
+      expect(outcome.isError, outcome.text).toBe(false);
+      expect(outcome.text).toContain('service.ts');
+      expect(outcome.text).not.toContain('elsewhere.ts');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -1,11 +1,40 @@
 process.env.COMPRESSOR_NO_LEDGER = '1'; // never touch the real ledger from tests
 
+import { readFile, readdir, rm } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { OMISSION_MARKER } from '@astudioplus/compressor';
+import { OMISSION_MARKER, cheapEstimator, settleLedger } from '@astudioplus/compressor';
+import type { LedgerEvent } from '@astudioplus/compressor';
+import { SymbolKind } from 'vscode';
 import { retargetMarkers, runOutlineTool } from '../src/tools/outline';
 import type { ReadToolDeps } from '../src/tools/read';
+import type { CodeSymbol } from '../src/tools/symbols';
+import { tempDir } from './fixtures';
 
 const WS = '/ws/project';
+
+/** Run with the ledger switched on into a temp dir, and return what it wrote. */
+async function withLedger(run: () => Promise<void>): Promise<LedgerEvent[]> {
+  const dir = await tempDir('compressor-outline-ledger-');
+  delete process.env['COMPRESSOR_NO_LEDGER'];
+  process.env['COMPRESSOR_LEDGER_DIR'] = dir;
+  try {
+    await run();
+    await settleLedger();
+    const events: LedgerEvent[] = [];
+    for (const file of await readdir(dir)) {
+      for (const line of (await readFile(path.join(dir, file), 'utf8')).split('\n')) {
+        if (line.trim() !== '') events.push(JSON.parse(line) as LedgerEvent);
+      }
+    }
+    return events;
+  } finally {
+    await settleLedger();
+    delete process.env['COMPRESSOR_LEDGER_DIR'];
+    process.env['COMPRESSOR_NO_LEDGER'] = '1';
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 const BIG_TS = [
   "import { foo } from './foo';",
@@ -106,9 +135,9 @@ describe('outline honesty', () => {
         (_, i) => `  run${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
       ).join('\n'),
       symbols: async () => [{
-        name: 'Service', detail: '', start: 1, end: 120,
+        name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 120,
         children: Array.from({ length: 40 }, (_, i) => ({
-          name: `run${i}`, detail: '', start: i * 3 + 1, end: i * 3 + 3, children: [],
+          name: `run${i}`, detail: '', kind: SymbolKind.Method, column: 0, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
         })),
       }],
     });
@@ -116,6 +145,169 @@ describe('outline honesty', () => {
     expect(outcome.text).toContain('signatures only, bodies omitted');
     expect(outcome.text).toContain('compressor_read');
     expect(outcome.text).toContain('Service.run0');
+  });
+
+  // End to end: a C++ header marks its public members and not its private ones,
+  // and because every symbol was judged the preamble keeps its second sentence.
+  it('outlines a C++ header by access section, keeping the full legend', async () => {
+    // inline bodies, so the listing genuinely beats the source and the outline
+    // is what comes back rather than the header itself
+    const COUNT = 40;
+    const header = [
+      'class Widget {',
+      'public:',
+      ...Array.from({ length: COUNT }, (_, i) => [
+        `  void member${i}() {`,
+        `    doSomethingFairlyVerbose(${i});`,
+        '  }',
+      ]).flat(),
+      'private:',
+      '  void hiddenHelper() {',
+      '    doSomethingFairlyVerbose(-1);',
+      '  }',
+      '};',
+    ].join('\n');
+    const member = (name: string, declLine: number): CodeSymbol => ({
+      name, detail: '()', kind: SymbolKind.Method,
+      column: 7, declLine, start: declLine, end: declLine + 2, children: [],
+    });
+    const outcome = await runOutlineTool({ path: 'src/widget.hpp' }, deps(header, {
+      symbols: async () => [{
+        name: 'Widget', detail: '', kind: SymbolKind.Class,
+        column: 6, declLine: 1, start: 1, end: COUNT * 3 + 7,
+        children: [
+          ...Array.from({ length: COUNT }, (_, i) => member(`member${i}`, i * 3 + 3)),
+          member('hiddenHelper', COUNT * 3 + 4),
+        ],
+      }],
+    }));
+    expect(outcome.text).toContain('*Widget ');
+    expect(outcome.text).toMatch(/^\*Widget\.member0 /m);
+    expect(outcome.text).toMatch(/^Widget\.hiddenHelper /m);
+    expect(outcome.text).toContain('do not list them as its API');
+  });
+
+  it('keeps the unmarked-names claim for a listing it judged throughout', async () => {
+    const source = Array.from(
+      { length: 40 },
+      (_, i) => `export function exportedNumber${i}(): void {\n  doSomethingFairlyVerbose(${i});\n}`,
+    ).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/api.ts' }, deps(source, {
+      symbols: async () => Array.from({ length: 40 }, (_, i) => ({
+        name: `exportedNumber${i}`, detail: '(): void', kind: SymbolKind.Function,
+        column: 16, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+      })),
+    }));
+    expect(outcome.text).toContain('do not list them as its API');
+  });
+
+  // The tool description and the steering both tie their claim about `*` to
+  // this sentence, because a language with no visibility rule gets neither.
+  // An outline that marked nothing while the steering said "unmarked means
+  // internal" would report that such a file has no public API at all.
+  it('says nothing about visibility for a language it has no rule for', async () => {
+    const outcome = await runOutlineTool({ path: 'lib/thing.rb' }, {
+      workspaceFolders: [WS],
+      mode: 'optimized',
+      readFile: async () => Array.from(
+        { length: 40 },
+        (_, i) => `  def run_${i}\n    do_something_fairly_verbose(${i})\n  end`,
+      ).join('\n'),
+      symbols: async () => [{
+        name: 'Thing', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 120,
+        children: Array.from({ length: 40 }, (_, i) => ({
+          name: `run_${i}`, detail: '', kind: SymbolKind.Method,
+          column: 0, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+        })),
+      }],
+    });
+    expect(outcome.text).toContain('Thing.run_0');
+    expect(outcome.text).not.toContain('visible outside this file');
+    expect(outcome.text).not.toMatch(/^\*/m);
+  });
+
+  // The legend is spliced into the preamble before the cap runs. A file whose
+  // exports all sit below the cut shipped "unmarked names are internal to it"
+  // above a listing with no marks at all, which reads as "this file exports
+  // nothing" — the inverse of the preamble contract.
+  it('drops the legend when the budget cut away every mark it explains', async () => {
+    const COUNT = 120;
+    const internals = Array.from({ length: COUNT }, (_, i) => `function internalHelperNumber${i}() {}`);
+    const source = [...internals, 'export function shownAtTheEnd() {}'].join('\n');
+    const outcome = await runOutlineTool({ path: 'src/late.ts' }, deps(source, {
+      symbols: async () => [
+        ...internals.map((_, i) => ({
+          name: `internalHelperNumber${i}`, detail: '(): void', kind: SymbolKind.Function,
+          column: 9, declLine: i + 1, start: i + 1, end: i + 1, children: [],
+        })),
+        {
+          name: 'shownAtTheEnd', detail: '(): void', kind: SymbolKind.Function,
+          column: 16, declLine: COUNT + 1, start: COUNT + 1, end: COUNT + 1, children: [],
+        },
+      ],
+      tokenBudget: 200,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).not.toMatch(/^\*/m);
+    expect(outcome.text).not.toContain('visible outside this file');
+    // the caller still has to be told the listing is partial
+    expect(outcome.text).toContain('[compressor:');
+  });
+
+  // The source fallback is the file's own bytes, and a model copying an
+  // `old_string` out of it has to match what is on disk. Rewriting the
+  // returned text to drop a legend sentence edited the file's content when the
+  // file happened to quote that sentence.
+  it('returns the source fallback byte for byte, legend sentence and all', async () => {
+    const legend =
+      '* = visible outside this file or its class; unmarked names are internal to it, so do not list them as its API. ';
+    const source = [
+      'const LEGEND =',
+      `  '${legend}';`,
+      'export function explain(): string { return LEGEND; }',
+    ].join('\n');
+    const outcome = await runOutlineTool({ path: 'src/legend.ts' }, deps(source, {
+      // a listing larger than the file, so selectOutput returns the source
+      symbols: async () => Array.from({ length: 60 }, (_, i) => ({
+        name: `symbolNumber${i}`, detail: `(argument: SomeFairlyLongTypeName${i}) => void`,
+        kind: SymbolKind.Function, column: 0, declLine: 1, start: 1, end: 1, children: [],
+      })),
+    }));
+    const returned = outcome.text.split('\n').map((line) => line.replace(/^\s*\d+→/, '')).join('\n');
+    expect(returned).toBe(source);
+  });
+
+  // "full file below" is a coverage claim. The cap that shortens the listing
+  // makes it false, and it sat at the head of the string the cap truncated.
+  it('drops the full-file claim when the budget cut the listing short', async () => {
+    const source = Array.from(
+      { length: 400 },
+      (_, i) => `export type AliasNumber${i} = SomeFairlyLongTypeName${i};`,
+    ).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/types.ts' }, deps(source, {
+      tokenBudget: 200,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).not.toContain('full file below');
+    expect(outcome.text).toContain('[compressor:');
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(200);
+    expect(outcome.outlined).toBe(true);
+  });
+
+  // The backstop belongs to the tool, not to one of its paths: a file with no
+  // symbol provider takes the skeleton fallback, and an uncapped skeleton is
+  // what the host spills to a chat-session resource the model then re-reads.
+  it('caps the no-provider skeleton path when the host supplies no budget', async () => {
+    const source = Array.from({ length: 800 }, (_, i) => [
+      `def function_number_${i}(argument_one, argument_two):`,
+      '    value = argument_one + argument_two',
+      '    other = value * 2',
+      '    return other',
+    ].join('\n')).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/big.py' }, deps(source));
+    expect(outcome.isError).toBe(false);
+    expect(cheapEstimator(outcome.text)).toBeLessThanOrEqual(5_000);
+    expect(outcome.text.length).toBeLessThan(source.length);
   });
 
   it('never points the model at the built-in read, which the agent cannot use', () => {
@@ -131,5 +323,174 @@ describe('outline honesty', () => {
 
   it('leaves unrelated text alone', () => {
     expect(retargetMarkers('nothing to do here', '/w/a.ts', 'a.ts')).toBe('nothing to do here');
+  });
+});
+
+describe('the budget is a cap, not a preference', () => {
+  // A JSON symbol provider reports one symbol per key, so the outline of a
+  // package.json is larger than the file. Falling back to the source is right;
+  // returning it uncapped is not. Observed in Copilot: the fallback overflowed
+  // the host's inline limit, VS Code spilled the result to a chat-session
+  // resource file, the model read that file, and the read spilled in turn —
+  // nine calls that never retrieved the file, ending in a question to the user.
+  const KEYS = 3_000;
+  const JSON_SRC = ['{', ...Array.from({ length: KEYS }, (_, i) => `  "key${i}": "value${i}",`), '}'].join('\n');
+  const jsonSymbols = async () => Array.from({ length: KEYS }, (_, i) => ({
+    // a real provider's detail strings make each line longer than the source line
+    name: `contributes.section.key${i}`, detail: `"value${i}"`, kind: SymbolKind.Property,
+    column: 2, declLine: i + 2, start: i + 2, end: i + 2, children: [],
+  }));
+
+  it('caps the source fallback when the host supplies no budget', async () => {
+    // The host is not required to send tokenizationOptions. With no budget the
+    // cap was skipped entirely and the whole file went back, which is what the
+    // host then had to spill.
+    const outcome = await runOutlineTool({ path: 'package.json' }, deps(JSON_SRC, {
+      symbols: jsonSymbols,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(5_000);
+  });
+
+  it('still says the output is partial when it caps the fallback', async () => {
+    const outcome = await runOutlineTool({ path: 'package.json' }, deps(JSON_SRC, {
+      symbols: jsonSymbols,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).toContain('compressor:');
+  });
+
+  // The ledger is the only record of what the tool did. Here the listing lost
+  // to the source and the cap trimmed the source, so no outline was produced
+  // and the reduction belongs to the budget, not to the symbol provider.
+  it('attributes a capped source fallback to the budget, not to the outline', async () => {
+    // selectOutput compares characters first, the budget counts tokens, and a
+    // real tokenizer does not hold those in proportion: JSON pays a token per
+    // quote and brace, a signature listing pays for long identifiers. Here the
+    // listing is the longer text and the source is the more expensive one, so
+    // the source is selected and then trimmed — no outline is produced.
+    const verbose = (i: number) => `(argument${i}: ${'Namespaced.Type.Argument'.repeat(60)})`;
+    const events = await withLedger(async () => {
+      await runOutlineTool({ path: 'package.json' }, deps(JSON_SRC, {
+        symbols: async () => Array.from({ length: 300 }, (_, i) => ({
+          name: `section.key${i}`, detail: verbose(i), kind: SymbolKind.Property,
+          column: 2, declLine: i + 2, start: i + 2, end: i + 2, children: [],
+        })),
+        countTokens: async (text: string) =>
+          (text.match(/["{}]/g)?.length ?? 0) + Math.ceil(text.length / 100),
+      }));
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.transforms).toEqual(['host-budget']);
+  });
+
+  // `outlined` is documented as "true when a smaller outline was returned (and
+  // a ledger event fired)". With no provider and a skeleton that loses to the
+  // source, the cap trims the source: a reduction happened, so the ledger has
+  // to carry it, and the transform that applied is the budget, not an outline.
+  it('records the cap when the skeleton loses and the source is trimmed', async () => {
+    // Bodies small enough that each recovery marker costs more than the lines
+    // it replaces: skeleton does collapse them, but the result is no smaller,
+    // so selectOutput keeps the source and the backstop then cuts it.
+    const source = Array.from({ length: 900 }, (_, i) => [
+      `def function_number_${i}(argument):`,
+      `    first_${i} = argument + ${i}`,
+      `    return first_${i}`,
+    ].join('\n')).join('\n');
+    const events = await withLedger(async () => {
+      const outcome = await runOutlineTool({ path: 'src/many.py' }, deps(source));
+      expect(outcome.outlined).toBe(true);
+      expect(cheapEstimator(outcome.text)).toBeLessThanOrEqual(5_000);
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.transforms).toEqual(['host-budget']);
+  });
+
+  it('attributes a listing that beat the source to the symbol provider', async () => {
+    const source = Array.from(
+      { length: 200 },
+      (_, i) => `  methodNumber${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
+    ).join('\n');
+    const events = await withLedger(async () => {
+      await runOutlineTool({ path: 'src/service.ts' }, deps(source, {
+        symbols: async () => [{
+          name: 'Service', detail: '', kind: SymbolKind.Class,
+          column: 13, declLine: 1, start: 1, end: 600,
+          children: Array.from({ length: 200 }, (_, i) => ({
+            name: `methodNumber${i}`, detail: '(): void', kind: SymbolKind.Method,
+            column: 2, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+          })),
+        }],
+      }));
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.transforms).toEqual(['symbol-outline']);
+  });
+});
+
+// A budget smaller than the recovery marker is still a budget. fitOutput
+// answers '' there, and the `|| <uncapped>` fallbacks then handed back the
+// full listing: the one regime where the cap matters most was the one it was
+// skipped in, and a 20-token request was answered with a 213-token listing.
+// compressor_read already returns a short notice in the same regime.
+describe('a budget below the size of a recovery marker', () => {
+  const COUNT = 40;
+  const SOURCE = [
+    ...Array.from({ length: COUNT }, (_, i) => `function internalHelperNumber${i}() {}`),
+    'export function shownAtTheEnd() {}',
+  ].join('\n');
+  const SYMBOLS = async (): Promise<CodeSymbol[]> => [
+    ...Array.from({ length: COUNT }, (_, i) => ({
+      name: `internalHelperNumber${i}`, detail: '(): void', kind: SymbolKind.Function,
+      column: 9, declLine: i + 1, start: i + 1, end: i + 1, children: [],
+    })),
+    {
+      name: 'shownAtTheEnd', detail: '(): void', kind: SymbolKind.Function,
+      column: 16, declLine: COUNT + 1, start: COUNT + 1, end: COUNT + 1, children: [],
+    },
+  ];
+  const countTokens = async (text: string): Promise<number> => Math.ceil(text.length / 4);
+
+  it('answers a listing with a short notice instead of the uncapped text', async () => {
+    const outcome = await runOutlineTool({ path: 'src/late.ts' }, deps(SOURCE, {
+      symbols: SYMBOLS, tokenBudget: 20, countTokens,
+    }));
+    expect(outcome.text).toContain('the budget cannot fit a recovery marker');
+    expect(outcome.text).toContain('src/late.ts');
+    expect(outcome.text).not.toContain('internalHelperNumber5');
+    expect(outcome.text.length).toBeLessThan(SOURCE.length);
+  });
+
+  it('applies the same notice on the no-provider skeleton path', async () => {
+    const source = Array.from({ length: 200 }, (_, i) => [
+      `def function_number_${i}(argument_one, argument_two):`,
+      '    value = argument_one + argument_two',
+      '    return value * 2',
+    ].join('\n')).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/big.py' }, deps(source, {
+      tokenBudget: 20, countTokens,
+    }));
+    expect(outcome.text).toContain('the budget cannot fit a recovery marker');
+    expect(outcome.text).not.toContain('function_number_5(');
+  });
+
+  it('keeps the file when the notice would be longer than it', async () => {
+    // A notice longer than the thing it stands in for helps nobody; this is
+    // the guard compressor_read already carries.
+    const outcome = await runOutlineTool({ path: 'src/x.ts' }, deps('export function x() {\n  return 1;\n}', {
+      tokenBudget: 1, countTokens,
+    }));
+    expect(outcome.text).toContain('return 1;');
+  });
+
+  it('leaves normal budgets capping as before', async () => {
+    for (const tokenBudget of [120, 400]) {
+      const outcome = await runOutlineTool({ path: 'src/late.ts' }, deps(SOURCE, {
+        symbols: SYMBOLS, tokenBudget, countTokens,
+      }));
+      expect(outcome.text).toContain('[compressor: partial output;');
+      expect(outcome.text).not.toContain('the budget cannot fit a recovery marker');
+      expect(await countTokens(outcome.text)).toBeLessThanOrEqual(tokenBudget);
+    }
   });
 });

@@ -1,6 +1,7 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { SymbolKind } from 'vscode';
 import { settleLedger } from '@astudioplus/compressor';
 import type { LedgerEvent } from '@astudioplus/compressor';
 import {
@@ -100,7 +101,7 @@ describe('runReadTool', () => {
   it('reads the exact provider symbol range without compression', async () => {
     const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'Service.run' }, deps({
       readFile: async () => 'class Service {\n  run() {\n    return 42;\n  }\n}',
-      symbols: async () => [{ name: 'Service', detail: '', start: 1, end: 5, children: [{ name: 'run', detail: '', start: 2, end: 4, children: [] }] }],
+      symbols: async () => [{ name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 5, children: [{ name: 'run', detail: '', kind: SymbolKind.Method, column: 0, declLine: 2, start: 2, end: 4, children: [] }] }],
     }));
     expect(outcome.isError).toBe(false);
     expect(outcome.compressed).toBe(false);
@@ -112,7 +113,7 @@ describe('runReadTool', () => {
 
   it('rejects ambiguous symbol names instead of choosing a method silently', async () => {
     const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'run' }, deps({
-      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', start: 1, end: 5, children: [{ name: 'run', detail: '', start: 2, end: 4, children: [] }] })),
+      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 5, children: [{ name: 'run', detail: '', kind: SymbolKind.Method, column: 0, declLine: 2, start: 2, end: 4, children: [] }] })),
     }));
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain('Ambiguous');
@@ -170,15 +171,62 @@ describe('runReadTool', () => {
     expect(outcome.compressed).toBe(true);
   });
 
-  it('leaves an exact range and full mode unbudgeted', async () => {
+  it('leaves full mode unbudgeted', async () => {
     const raw = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
     const budget = { tokenBudget: 1, countTokens: async (text: string) => text.length };
-    const ranged = await runReadTool({ path: 'notes.txt', offset: 1, limit: 200 }, deps({ readFile: async () => raw, ...budget }));
     const full = await runReadTool({ path: 'notes.txt' }, deps({ readFile: async () => raw, mode: 'full', ...budget }));
-    expect(ranged.compressed).toBe(false);
-    expect(ranged.text).toContain('line 199');
     expect(full.compressed).toBe(false);
     expect(full.text).toContain('line 199');
+  });
+
+  // An exact range used to be exempt from the budget, on the reasoning that a
+  // verbatim range is what makes a read citable by line. The host disproved it:
+  // it spills any result over its own inline limit to a file, so an oversized
+  // range never reached the model verbatim anyway — it arrived as a path, and
+  // reading that path spilled again. The range is still verbatim as far as it
+  // goes; what changed is that it now stops at the budget and says where.
+  it('caps an exact range and reports the lines it actually returned', async () => {
+    const raw = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+    const outcome = await runReadTool({ path: 'notes.txt', offset: 1, limit: 200 }, deps({
+      readFile: async () => raw,
+      tokenBudget: 60,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(60);
+    // the note must not claim the 200 lines that were asked for
+    const claimed = /showing lines 1-(\d+) of 200/.exec(outcome.text);
+    expect(claimed).not.toBeNull();
+    expect(Number(claimed![1])).toBeLessThan(200);
+    // and what it claims must be what is there
+    expect(outcome.text).toContain(`${claimed![1]}→line ${claimed![1]}`);
+  });
+
+  it('claims no coverage when the budget left room for the notice alone', async () => {
+    const raw = Array.from({ length: 2_000 }, (_, i) => `line ${i + 1}`).join('\n');
+    const outcome = await runReadTool({ path: 'notes.txt', offset: 1, limit: 200 }, deps({
+      readFile: async () => raw,
+      tokenBudget: 40,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).toContain('the budget cannot fit a recovery marker');
+    // not one line came back, so there is no range the result can be said to
+    // show; the requested range is the one claim that is certainly false
+    expect(outcome.text).not.toContain('showing lines');
+    expect(outcome.text).not.toMatch(/\d+→/);
+  });
+
+  it('tells a capped range that a larger limit will not help', async () => {
+    const raw = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
+    const read = (limit: number) => runReadTool({ path: 'notes.txt', offset: 1, limit }, deps({
+      readFile: async () => raw,
+      tokenBudget: 60,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    const small = await read(50);
+    const large = await read(200);
+    // the observed failure: the model raised limit and received the same bytes
+    expect(large.text).toBe(small.text);
+    expect(large.text).toContain('a larger limit returns the same bytes');
   });
 
   it('a budget-trimmed read names where to resume, and resuming covers the rest', async () => {
@@ -214,6 +262,34 @@ describe('runReadTool', () => {
     const outcome = await runReadTool({ path: 'notes.txt' }, deps({ readFile: async () => raw, tokenBudget, countTokens }));
     expect(await countTokens(outcome.text)).toBeLessThanOrEqual(tokenBudget);
     expect(outcome.text).toContain('continue with offset=');
+  });
+
+  it('never tells the caller the workspace itself is outside the workspace', async () => {
+    // observed: a model outlined the workspace root, was told it was "outside
+    // the open workspace folder(s)", concluded the tool could not see the
+    // project at all, and answered from filenames instead of calling it again
+    for (const requested of [WS, '.', `${WS}/`]) {
+      const resolved = resolveWorkspacePath(requested, [WS]);
+      expect('error' in resolved, requested).toBe(false);
+    }
+  });
+
+  // Against a real directory, with no injected readFile: an earlier version of
+  // this test mocked readFile to throw the sentence it then asserted on, so it
+  // passed whether or not readWorkspaceFile classified directories at all.
+  it('says a directory is a directory, and names the tool to reach for', async () => {
+    const dir = await tempDir('compressor-readtool-dir-');
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      const outcome = await runReadTool({ path: 'src' }, { workspaceFolders: [dir], mode: 'optimized' });
+      expect(outcome.isError).toBe(true);
+      expect(outcome.text).toContain('a directory, not a file');
+      expect(outcome.text).toContain('compressor_search');
+      // the old wording implied a size limit, which left no next step
+      expect(outcome.text).not.toContain('8 MB');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('tolerates stray whitespace around the path', async () => {
@@ -269,8 +345,8 @@ describe('runReadTool', () => {
     const outcome = await runReadTool({ path: 'src/service.ts' }, deps({
       readFile: async () => raw,
       symbols: async () => [{
-        name: 'Service', detail: '', start: 1, end: 62,
-        children: [{ name: 'run', detail: '(): void', start: 2, end: 61, children: [] }],
+        name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 62,
+        children: [{ name: 'run', detail: '(): void', kind: SymbolKind.Method, column: 0, declLine: 2, start: 2, end: 61, children: [] }],
       }],
       tokenBudget: 120,
       countTokens: async (text: string) => Math.ceil(text.length / 3.5),
@@ -381,5 +457,39 @@ describe('runReadTool', () => {
     expect(outcome.text).toContain('src/gone.ts');
     expect(outcome.text).toContain('not found in the workspace');
     expect(outcome.text.split('\n')).toHaveLength(1); // short, not a stack
+  });
+});
+
+describe('an absent host budget is not an absent cap', () => {
+  // tokenizationOptions is optional in the language-model tool API. Treating a
+  // missing budget as "no cap" returned whole files, which the host then had
+  // to spill to a chat-session resource file.
+  const BIG = Array.from({ length: 4_000 }, (_, i) => `line ${i + 1} of plain text content`).join('\n');
+
+  it('caps a whole-file read when the host supplies no budget', async () => {
+    const outcome = await runReadTool({ path: 'big.txt' }, deps({
+      readFile: async () => BIG,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(5_000);
+    expect(outcome.text).toContain('compressor:');
+  });
+
+  it('halves the backstop in slim', async () => {
+    const outcome = await runReadTool({ path: 'big.txt' }, deps({
+      mode: 'slim',
+      readFile: async () => BIG,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(2_500);
+  });
+
+  it('leaves full mode untrimmed, since that is what full asks for', async () => {
+    const outcome = await runReadTool({ path: 'big.txt' }, deps({
+      mode: 'full',
+      readFile: async () => BIG,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(Math.ceil(outcome.text.length / 4)).toBeGreaterThan(5_000);
   });
 });
