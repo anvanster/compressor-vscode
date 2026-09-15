@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { SymbolKind } from 'vscode';
 import { type CodeSymbol, exportLegend, formatSymbols } from '../src/tools/symbols';
 
+/** A parent symbol, its children, and the kind the provider gives the parent. */
+type Spec = readonly [string, readonly string[]] | readonly [string, readonly string[], SymbolKind];
+
 /** Build a symbol tree by finding each name in the source, as a provider would. */
-function symbolsFor(source: string, spec: readonly (readonly [string, readonly string[]])[]): CodeSymbol[] {
+function symbolsFor(source: string, spec: readonly Spec[]): CodeSymbol[] {
   const lines = source.split('\n');
   // A provider reports selectionRange over the name and range over the whole
   // symbol, comments included. declLine/column mirror selectionRange; start
@@ -17,22 +21,25 @@ function symbolsFor(source: string, spec: readonly (readonly [string, readonly s
     }
     throw new Error(`no line contains ${name}`);
   };
-  return spec.map(([parent, children]) => {
+  return spec.map(([parent, children, kind]) => {
     const at = locate(parent);
     let cursor = at.declLine - 1;
     return {
-      name: parent, detail: '', ...at, end: at.declLine,
+      name: parent, detail: '', kind: kind ?? SymbolKind.Class, ...at, end: at.declLine,
       children: children.map((child) => {
         const childAt = locate(child, cursor);
         cursor = childAt.declLine - 1;
-        return { name: child, detail: '', ...childAt, end: childAt.declLine, children: [] };
+        return {
+          name: child, detail: '', kind: SymbolKind.Method,
+          ...childAt, end: childAt.declLine, children: [],
+        };
       }),
     };
   });
 }
 
 /** Names carrying the `*` mark, unqualified. */
-function exported(path: string, source: string, spec: Parameters<typeof symbolsFor>[1]): string[] {
+function exported(path: string, source: string, spec: readonly Spec[]): string[] {
   const lines = source.split('\n');
   return formatSymbols(symbolsFor(source, spec), { path, lines })
     .split('\n')
@@ -130,6 +137,71 @@ describe('other languages', () => {
   it('marks Java public and leaves package-private alone', () => {
     const java = ['public class S {', '    public void run() {}', '    void pkg() {}', '}'].join('\n');
     expect(exported('S.java', java, [['S', ['run', 'pkg']]])).toEqual(['S', 'run']);
+  });
+
+  // Kotlin, Scala and Groovy default to public. Under the Java rule, which
+  // needs a literal `public`, a file's one explicitly-public declaration was
+  // the only thing marked — and the legend then said every other declaration
+  // was internal, which is the misreading the mark exists to prevent.
+  it('marks a Kotlin file that never writes `public`', () => {
+    const kt = [
+      'class Box(private val item: String) {',
+      '    fun open() {}',
+      '    private fun latch() {}',
+      '    internal fun crate() {}',
+      '    protected fun lid() {}',
+      '}',
+    ].join('\n');
+    expect(exported('Box.kt', kt, [['Box', ['open', 'latch', 'crate', 'lid']]]))
+      .toEqual(['Box', 'open']);
+    expect(exported('Box.kts', kt, [['Box', ['open', 'latch', 'crate', 'lid']]]))
+      .toEqual(['Box', 'open']);
+  });
+
+  it('marks a Scala file, honouring private[this]', () => {
+    const scala = [
+      'class Box {',
+      '  def open(): Unit = {}',
+      '  private[this] def latch(): Unit = {}',
+      '  protected def lid(): Unit = {}',
+      '}',
+    ].join('\n');
+    expect(exported('Box.scala', scala, [['Box', ['open', 'latch', 'lid']]]))
+      .toEqual(['Box', 'open']);
+  });
+
+  it('marks a Groovy file', () => {
+    const groovy = ['class Box {', '    def open() {}', '    private def latch() {}', '}'].join('\n');
+    expect(exported('Box.groovy', groovy, [['Box', ['open', 'latch']]])).toEqual(['Box', 'open']);
+  });
+});
+
+describe('a function\'s children are locals, not API', () => {
+  // A TS provider reports nested functions and function-valued consts as
+  // children. The member branch of a rule sees no `private`/`protected` on
+  // their line and marks them, so a file-local helper is handed to the model
+  // as part of the module's public surface.
+  it('does not mark an arrow function declared inside an exported function', () => {
+    const ts = [
+      'export function runReadTool(): void {',
+      '  const shown = (text: string): string => text;',
+      '  shown("x");',
+      '}',
+    ].join('\n');
+    expect(exported('read.ts', ts, [['runReadTool', ['shown'], SymbolKind.Function]]))
+      .toEqual(['runReadTool']);
+  });
+
+  it('does not mark a local inside a Python function', () => {
+    const py = ['def run_it():', '    def helper():', '        pass', '    helper()'].join('\n');
+    expect(exported('a.py', py, [['run_it', ['helper'], SymbolKind.Function]]))
+      .toEqual(['run_it']);
+  });
+
+  it('still marks the members of a class, which are declarations', () => {
+    const ts = ['export class Service {', '  run() {}', '}'].join('\n');
+    expect(exported('a.ts', ts, [['Service', ['run'], SymbolKind.Class]]))
+      .toEqual(['Service', 'run']);
   });
 });
 

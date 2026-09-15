@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { isChatSessionResource, containsPath, readWorkspaceFile, setChatResourceRoot } from '../src/tools/workspace-file';
+import { runSearchTool } from '../src/tools/search';
 
 it('rejects symlinks outside the workspace but permits internal targets', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'compressor-boundary-'));
@@ -85,5 +86,52 @@ describe('unreadable targets name what is wrong', () => {
     // a size message for a directory sends the caller looking for a big file
     await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
       .rejects.not.toThrow(/8 MB/);
+  });
+
+  // The message is a recovery instruction: a model follows it literally, so a
+  // call it names has to be one compressor_search accepts. The previous
+  // wording left out `query`, which the tool requires, spending a whole turn
+  // on `compressor_search: a query is required`.
+  it('names a compressor_search call that compressor_search accepts', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'compressor-dirmsg-call-'));
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await writeFile(path.join(dir, 'src', 'service.ts'), 'export const marker = 1;\n');
+      await writeFile(path.join(dir, 'elsewhere.ts'), 'export const marker = 2;\n');
+      const message = await readWorkspaceFile(path.join(dir, 'src'), [dir])
+        .then(() => '', (error: Error) => error.message);
+
+      // rebuild the suggested call out of the message rather than restating it
+      const suggested = /compressor_search \(([^)]*)\)/.exec(message);
+      expect(suggested, message).not.toBeNull();
+      const argument = (name: string): string | undefined =>
+        new RegExp(`\\b${name}=(\\S+?)(?:,|$)`).exec(suggested![1]!)?.[1];
+      expect(argument('query'), message).toBeDefined();
+
+      const include = argument('include')!.replace('<dir>', 'src');
+      const glob = new RegExp(`^${include.replace(/\*\*/g, '.*').replace(/([^.])\*/g, '$1[^/]*')}$`);
+      const outcome = await runSearchTool({
+        query: 'marker',
+        include,
+        output: argument('output') as 'files' | undefined,
+      }, {
+        workspaceFolders: [dir],
+        mode: 'optimized',
+        findFiles: async (pattern) => {
+          const matcher = new RegExp(`^${pattern.replace(/\*\*/g, '.*').replace(/([^.])\*/g, '$1[^/]*')}$`);
+          return ['src/service.ts', 'elsewhere.ts']
+            .filter((file) => matcher.test(file))
+            .map((file) => path.join(dir, file));
+        },
+      });
+
+      expect(outcome.isError, outcome.text).toBe(false);
+      expect(outcome.text).toContain('service.ts');
+      // the include the message names has to scope the search to the directory
+      expect(glob.test('src/service.ts')).toBe(true);
+      expect(outcome.text).not.toContain('elsewhere.ts');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

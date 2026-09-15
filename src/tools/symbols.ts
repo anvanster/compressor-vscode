@@ -4,6 +4,12 @@ import { visibilityRule } from './visibility';
 export interface CodeSymbol {
   name: string;
   detail: string;
+  /**
+   * What the provider says this symbol is. Only the kind decides whether the
+   * symbols nested under it are declared members or function locals, and no
+   * visibility rule can tell the two apart from the declaration line alone.
+   */
+  kind: vscode.SymbolKind;
   /** 1-based first line of the symbol, comments included: the range to read. */
   start: number;
   end: number;
@@ -36,6 +42,7 @@ export async function documentSymbols(file: string): Promise<CodeSymbol[]> {
     return {
       name: symbol.name,
       detail: 'detail' in symbol ? symbol.detail : '',
+      kind: symbol.kind,
       start: range.start.line + 1,
       end: range.end.line + 1,
       declLine: name.line + 1,
@@ -84,6 +91,24 @@ export function exportLegend(formatted: string): string {
 }
 
 /**
+ * Kinds that declare members. A provider reports a function's nested functions
+ * and function-valued consts as its children, and those are locals: nothing
+ * outside the function can name them whatever their declaration line says, so
+ * every rule's member branch would over-mark them. `export function f() { const
+ * g = () => {}; }` is one symbol of public API, not two.
+ */
+const MEMBER_CONTAINERS: ReadonlySet<vscode.SymbolKind> = new Set([
+  vscode.SymbolKind.Class,
+  vscode.SymbolKind.Interface,
+  vscode.SymbolKind.Struct,
+  vscode.SymbolKind.Enum,
+  vscode.SymbolKind.EnumMember,
+  vscode.SymbolKind.Object,
+  vscode.SymbolKind.Namespace,
+  vscode.SymbolKind.Module,
+]);
+
+/**
  * Names the rule calls visible, in the order they appear. Visibility is
  * inherited: a public method of a class the file never exports is no more
  * reachable from outside than the class is, so a symbol is listed only when
@@ -109,9 +134,10 @@ function visibleNames(
         column: symbol.column,
         lines: source.lines,
       });
-      if (ok) visible.add(name);
-      // An invisible container hides everything under it, so stop descending.
-      if (ok) walk(symbol.children, name, symbol.declLine);
+      if (!ok) continue; // an invisible container hides everything under it
+      visible.add(name);
+      // Descending past anything but a member container reaches only locals.
+      if (MEMBER_CONTAINERS.has(symbol.kind)) walk(symbol.children, name, symbol.declLine);
     }
   };
   walk(symbols, '', 0);

@@ -68,7 +68,7 @@ export function userAgentPath(home: string = os.homedir()): string {
  * install should pick up. Stamped into owned files so an install can say what
  * it replaced, and so `status` can name the revision on disk.
  */
-export const STEERING_REVISION = 4;
+export const STEERING_REVISION = 5;
 
 const OWNED_MARKER_PREFIX = '<!-- compressor-vscode:owned';
 const OWNED_MARKER_RE = /<!-- compressor-vscode:owned v=(\d+) -->/;
@@ -158,11 +158,14 @@ obey it literally.
   does.
 - \`signatures only, bodies omitted\` is a shape, not an implementation. Names
   are not evidence of behaviour.
-- A leading \`*\` marks a declaration the tools read as visible outside its file,
-  or outside its class for a member. An unmarked symbol is internal to that
-  file: do not present it as part of a public API. The mark is read from the
-  declaration line, so a missing \`*\` means "not shown to be public", not proof
-  that nothing else can reach it.
+- A preamble explaining \`*\` means that result marks the declarations the tools
+  read as visible outside their file, or outside their class for a member.
+  Only then is an unmarked symbol internal to that file, and not to be
+  presented as part of a public API; the mark is read from the declaration
+  line, so a missing \`*\` means "not shown to be public", not proof that
+  nothing else can reach it. A result with no such preamble marks nothing —
+  its language has no visibility rule here — so say nothing about what it
+  exports.
 - A \`[compressor: ...]\` marker always names the exact call that retrieves what
   it left out. Make that call. Do not substitute a different tool.
 

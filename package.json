@@ -248,7 +248,7 @@
                 "toolReferenceName": "compressorOutline",
                 "displayName": "Code Outline",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. A leading * marks a declaration visible outside its file or class, so an outline separates a file's public surface from its internal helpers. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
+                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. When the preamble explains a leading *, that mark separates the file's externally visible declarations from its internal helpers; a file in a language with no visibility rule carries neither the mark nor that sentence, and says nothing either way about its public surface. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

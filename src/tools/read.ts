@@ -360,7 +360,11 @@ export async function runReadTool(
     // for — the whole point of the note is that it cannot overstate coverage.
     const shown = (text: string): string => {
       if (!targeted) return '';
-      const end = lastNumberedLine(text) ?? start + slice.length - 1;
+      // No numbered line means no line of the file was returned — the budget
+      // left room for the notice only. There is no coverage to state, and the
+      // requested range is exactly the claim that would be false.
+      const end = lastNumberedLine(text);
+      if (end === undefined) return '';
       return rangeNote(start, Math.max(0, end - start + 1), allLines.length);
     };
     if (content === numbered || (!budgeted && !worthwhile)) {

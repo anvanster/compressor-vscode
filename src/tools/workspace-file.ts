@@ -83,9 +83,13 @@ export async function readWorkspaceFile(target: string, roots: readonly string[]
   // regular text files up to 8 MB" for a directory reads as a size limit, and
   // leaves the caller with no next step.
   if (info.isDirectory()) {
+    // compressor_search has no listing mode: it requires a query and reports
+    // only the files that match it, so "list this directory" is a call this
+    // toolset cannot make. Naming one anyway costs the caller a failed turn.
     throw new Error(
-      'a directory, not a file. List what is in it with compressor_search ' +
-      '(output=files, include=<glob>), then read or outline one of those files',
+      'a directory, not a file. Name a file inside it, or find the files under ' +
+      'it that contain some text with compressor_search (query=<text>, ' +
+      'include=<dir>/**, output=files), then read or outline one of those',
     );
   }
   if (!info.isFile()) {

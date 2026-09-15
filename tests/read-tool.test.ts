@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { SymbolKind } from 'vscode';
 import { settleLedger } from '@astudioplus/compressor';
 import type { LedgerEvent } from '@astudioplus/compressor';
 import {
@@ -100,7 +101,7 @@ describe('runReadTool', () => {
   it('reads the exact provider symbol range without compression', async () => {
     const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'Service.run' }, deps({
       readFile: async () => 'class Service {\n  run() {\n    return 42;\n  }\n}',
-      symbols: async () => [{ name: 'Service', detail: '', column: 0, declLine: 1, start: 1, end: 5, children: [{ name: 'run', detail: '', column: 0, declLine: 2, start: 2, end: 4, children: [] }] }],
+      symbols: async () => [{ name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 5, children: [{ name: 'run', detail: '', kind: SymbolKind.Method, column: 0, declLine: 2, start: 2, end: 4, children: [] }] }],
     }));
     expect(outcome.isError).toBe(false);
     expect(outcome.compressed).toBe(false);
@@ -112,7 +113,7 @@ describe('runReadTool', () => {
 
   it('rejects ambiguous symbol names instead of choosing a method silently', async () => {
     const outcome = await runReadTool({ path: 'src/service.ts', symbol: 'run' }, deps({
-      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', column: 0, declLine: 1, start: 1, end: 5, children: [{ name: 'run', detail: '', column: 0, declLine: 2, start: 2, end: 4, children: [] }] })),
+      symbols: async () => ['First', 'Second'].map((name) => ({ name, detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 5, children: [{ name: 'run', detail: '', kind: SymbolKind.Method, column: 0, declLine: 2, start: 2, end: 4, children: [] }] })),
     }));
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain('Ambiguous');
@@ -200,6 +201,20 @@ describe('runReadTool', () => {
     expect(outcome.text).toContain(`${claimed![1]}→line ${claimed![1]}`);
   });
 
+  it('claims no coverage when the budget left room for the notice alone', async () => {
+    const raw = Array.from({ length: 2_000 }, (_, i) => `line ${i + 1}`).join('\n');
+    const outcome = await runReadTool({ path: 'notes.txt', offset: 1, limit: 200 }, deps({
+      readFile: async () => raw,
+      tokenBudget: 40,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).toContain('the budget cannot fit a recovery marker');
+    // not one line came back, so there is no range the result can be said to
+    // show; the requested range is the one claim that is certainly false
+    expect(outcome.text).not.toContain('showing lines');
+    expect(outcome.text).not.toMatch(/\d+→/);
+  });
+
   it('tells a capped range that a larger limit will not help', async () => {
     const raw = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join('\n');
     const read = (limit: number) => runReadTool({ path: 'notes.txt', offset: 1, limit }, deps({
@@ -259,9 +274,9 @@ describe('runReadTool', () => {
     }
   });
 
-  it('says a directory is a directory, and names the tool that lists one', async () => {
+  it('says a directory is a directory, and names the tool to reach for', async () => {
     const outcome = await runReadTool({ path: 'src' }, deps({
-      readFile: async () => { throw new Error('a directory, not a file. List what is in it with compressor_search'); },
+      readFile: async () => { throw new Error('a directory, not a file. Name a file inside it, or find the files under it with compressor_search'); },
     }));
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toContain('a directory, not a file');
@@ -323,8 +338,8 @@ describe('runReadTool', () => {
     const outcome = await runReadTool({ path: 'src/service.ts' }, deps({
       readFile: async () => raw,
       symbols: async () => [{
-        name: 'Service', detail: '', column: 0, declLine: 1, start: 1, end: 62,
-        children: [{ name: 'run', detail: '(): void', column: 0, declLine: 2, start: 2, end: 61, children: [] }],
+        name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 62,
+        children: [{ name: 'run', detail: '(): void', kind: SymbolKind.Method, column: 0, declLine: 2, start: 2, end: 61, children: [] }],
       }],
       tokenBudget: 120,
       countTokens: async (text: string) => Math.ceil(text.length / 3.5),

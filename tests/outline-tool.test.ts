@@ -2,6 +2,7 @@ process.env.COMPRESSOR_NO_LEDGER = '1'; // never touch the real ledger from test
 
 import { describe, expect, it } from 'vitest';
 import { OMISSION_MARKER } from '@astudioplus/compressor';
+import { SymbolKind } from 'vscode';
 import { retargetMarkers, runOutlineTool } from '../src/tools/outline';
 import type { ReadToolDeps } from '../src/tools/read';
 
@@ -106,9 +107,9 @@ describe('outline honesty', () => {
         (_, i) => `  run${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
       ).join('\n'),
       symbols: async () => [{
-        name: 'Service', detail: '', column: 0, declLine: 1, start: 1, end: 120,
+        name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 120,
         children: Array.from({ length: 40 }, (_, i) => ({
-          name: `run${i}`, detail: '', column: 0, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+          name: `run${i}`, detail: '', kind: SymbolKind.Method, column: 0, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
         })),
       }],
     });
@@ -116,6 +117,31 @@ describe('outline honesty', () => {
     expect(outcome.text).toContain('signatures only, bodies omitted');
     expect(outcome.text).toContain('compressor_read');
     expect(outcome.text).toContain('Service.run0');
+  });
+
+  // The tool description and the steering both tie their claim about `*` to
+  // this sentence, because a language with no visibility rule gets neither.
+  // An outline that marked nothing while the steering said "unmarked means
+  // internal" would report that such a file has no public API at all.
+  it('says nothing about visibility for a language it has no rule for', async () => {
+    const outcome = await runOutlineTool({ path: 'lib/thing.rb' }, {
+      workspaceFolders: [WS],
+      mode: 'optimized',
+      readFile: async () => Array.from(
+        { length: 40 },
+        (_, i) => `  def run_${i}\n    do_something_fairly_verbose(${i})\n  end`,
+      ).join('\n'),
+      symbols: async () => [{
+        name: 'Thing', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 120,
+        children: Array.from({ length: 40 }, (_, i) => ({
+          name: `run_${i}`, detail: '', kind: SymbolKind.Method,
+          column: 0, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+        })),
+      }],
+    });
+    expect(outcome.text).toContain('Thing.run_0');
+    expect(outcome.text).not.toContain('visible outside this file');
+    expect(outcome.text).not.toMatch(/^\*/m);
   });
 
   it('never points the model at the built-in read, which the agent cannot use', () => {
@@ -145,7 +171,7 @@ describe('the budget is a cap, not a preference', () => {
   const JSON_SRC = ['{', ...Array.from({ length: KEYS }, (_, i) => `  "key${i}": "value${i}",`), '}'].join('\n');
   const jsonSymbols = async () => Array.from({ length: KEYS }, (_, i) => ({
     // a real provider's detail strings make each line longer than the source line
-    name: `contributes.section.key${i}`, detail: `"value${i}"`,
+    name: `contributes.section.key${i}`, detail: `"value${i}"`, kind: SymbolKind.Property,
     column: 2, declLine: i + 2, start: i + 2, end: i + 2, children: [],
   }));
 

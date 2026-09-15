@@ -166,10 +166,13 @@ its class for a member, and the outline says so in its own preamble whenever it
 marks anything.
 An unmarked name is internal to that file and is not part of its API.
 The mark is read from the declaration line — `export`, `pub`, a capitalised Go
-name, an absent Python underscore, `public`, and for C and C++ the absence of
-file-scope `static` or an anonymous namespace — so it is a hint rather than a
-guarantee, and it is inherited: a public method of a class the file never
-exports is not marked.
+name, an absent Python underscore, `public` for Java and C#, the absence of
+`private`/`protected`/`internal` for Kotlin, Scala and Groovy, and for C and C++
+the absence of file-scope `static` or an anonymous namespace — so it is a hint
+rather than a guarantee, and it is inherited: a public method of a class the
+file never exports is not marked.
+Only a type-like symbol's members are considered; what a function declares
+inside itself is a local, and no local is ever marked.
 Languages without a rule are left unmarked entirely, and no preamble claims
 otherwise.
 

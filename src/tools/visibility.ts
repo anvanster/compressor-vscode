@@ -36,6 +36,15 @@ type Rule = (context: VisibilityContext) => boolean;
 const topLevel = (context: VisibilityContext): boolean => context.containerStart === 0;
 
 /**
+ * The untrimmed declaration line up to the name's column: every modifier sits
+ * to the left of the name it qualifies, and everything to the right belongs to
+ * the signature. `class Box(private val item: T)` declares a public `Box`, and
+ * scanning the whole line for `private` would call it hidden.
+ */
+const beforeName = (context: VisibilityContext): string =>
+  (context.lines[context.start - 1] ?? '').slice(0, context.column);
+
+/**
  * `public:` / `private:` / `protected:` and the `class` / `struct` / `union`
  * that opens their scope. A member's own line is searched only up to its start
  * column, so `class T { void hidden(); public: void shown(); };` resolves both
@@ -100,6 +109,11 @@ const RULES: Record<string, Rule> = {
   py: (context) => !context.name.startsWith('_'),
   // Java package-private and C# internal are both the unmarked default.
   java: (context) => /^(?:[\w@[\]]+\s+)*?public\b/.test(context.decl),
+  // Kotlin, Scala and Groovy default to public, so the test runs the other way
+  // round from Java's: visible unless the declaration hides it. Kotlin's
+  // `internal` does reach the rest of its module, but not the consumers this
+  // mark is about, so it joins `private` and `protected` on the hidden side.
+  open: (context) => !/\b(?:private|protected|internal)\b/.test(beforeName(context)),
   c: cFamily,
 };
 
@@ -109,7 +123,8 @@ const BY_EXTENSION: Record<string, keyof typeof RULES> = {
   rs: 'rs',
   go: 'go',
   py: 'py', pyi: 'py',
-  java: 'java', cs: 'java', kt: 'java', kts: 'java', scala: 'java', groovy: 'java',
+  java: 'java', cs: 'java',
+  kt: 'open', kts: 'open', scala: 'open', groovy: 'open',
   c: 'c', h: 'c', cpp: 'c', cc: 'c', cxx: 'c', 'c++': 'c',
   hpp: 'c', hh: 'c', hxx: 'c', 'h++': 'c', ipp: 'c', inl: 'c', cu: 'c', cuh: 'c',
 };
