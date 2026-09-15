@@ -4,7 +4,8 @@ Compressor gives the agent five tools in agent-mode chat. Reference any of them
 by name, or let steering pick them for you.
 
 **`#compressorRead`** preserves source and comments. Use `offset`/`limit` or a
-unique qualified `symbol` for an exact read. Repeated log lines may collapse.
+unique qualified `symbol` for a verbatim range; it stops at the token budget and
+names the line to resume from. Repeated log lines may collapse.
 
 **`#compressorSearch`** — find where something lives without reading whole
 files. Narrow with `root` and `include`; use `output=files` or `count` for compact

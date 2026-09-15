@@ -96,10 +96,11 @@ lines it returned.
 
 When a whole file does not fit the host's budget, the reply degrades in detail
 rather than in coverage: if a symbol provider can describe the file, you get the
-**complete** list of its declarations (no bodies, nothing dropped to fit), and
-the next step is one named range. Otherwise the trimmed output names the
-`offset` to continue from. A range that stops short of the end of the file is
-labeled with the lines shown out of the file's total.
+**complete** list of its declarations (no bodies, nothing dropped to fit,
+carrying the same `*` visibility marks an outline uses), and the next step is
+one named range. Otherwise the trimmed output names the `offset` to continue
+from. A range that stops short of the end of the file is labeled with the lines
+shown out of the file's total.
 
 ### Find things with `#compressorSearch`
 

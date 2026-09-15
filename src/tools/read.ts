@@ -21,9 +21,9 @@ import { measureOperation } from '../operation-metrics';
 export interface ReadToolInput {
   path: string;
   symbol?: string;
-  /** 1-based start line for an exact uncompressed range */
+  /** 1-based start line for a verbatim range; the range still stops at the budget */
   offset?: number;
-  /** line count for the exact range */
+  /** line count for the verbatim range */
   limit?: number;
 }
 
