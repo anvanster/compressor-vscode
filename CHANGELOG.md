@@ -109,7 +109,10 @@
   what it should summarize. The backstop is now shared by all three tools —
   5,000 tokens in `optimized`, 2,500 in `slim` — and the cap now applies to
   whichever of source or outline is selected, rather than only to the outline.
-  `full` mode is still never trimmed.
+  `full` mode is still never trimmed. When the budget cannot fit even a
+  recovery marker, `#compressorOutline` now answers with a short notice naming
+  the path instead of falling back to the uncapped listing, matching what
+  `#compressorRead` already did in that regime.
 - **Fixed: an explicit `offset`/`limit` was exempt from the budget.** The
   exemption was meant to keep a range verbatim, so a read stays citable and
   editable by line. The host disproves the premise: it spills any result over
