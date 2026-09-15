@@ -56,7 +56,12 @@ export type MemberScope =
   | 'member'
   /** By the file-scope rule: the member carries its own keyword. */
   | 'file'
-  /** No access keyword exists here, so a member is visible with its container. */
+  /**
+   * Public by default: a member that writes no access keyword is visible, and
+   * one that writes `private` or `protected` is not. Java 9 and C# 8 both let
+   * an interface hide a member, and a Java enum's fields and constructors are
+   * ordinary class members that only its constants are exempt from.
+   */
   | 'implicit'
   /**
    * A grouping rather than a scope: the container is not itself a symbol and is
@@ -69,6 +74,12 @@ export interface LanguageRule {
   visible: (context: VisibilityContext) => boolean;
   /** undefined for a kind that declares nothing: its children are locals. */
   scope: (container: ContainerContext) => MemberScope | undefined;
+  /**
+   * The declaration a `group` container borrows its reach from, when it names
+   * one. A Rust `impl` is reachable exactly as far as its self type is; a
+   * namespace names nothing and is closed by nothing.
+   */
+  subject?: (container: ContainerContext) => string | undefined;
 }
 
 type Rule = LanguageRule['visible'];
@@ -115,6 +126,28 @@ const withNamespaces = (namespaces: MemberScope) =>
  */
 const beforeName = (context: VisibilityContext): string =>
   (context.lines[context.start - 1] ?? '').slice(0, context.column);
+
+/**
+ * Public unless the declaration hides it. Reading only the text left of the
+ * name is what makes this narrow enough to trust: a keyword there qualifies
+ * this declaration and nothing else, so `constructor(public a: A, private b: B)`
+ * resolves both parameter properties, and a `Private` in a return type or an
+ * argument name to the right of the name cannot veto anything.
+ */
+export const implicitlyVisible = (context: VisibilityContext): boolean =>
+  !/\b(?:private|protected)\b/.test(beforeName(context)) && !context.name.startsWith('#');
+
+/**
+ * The self type of a Rust `impl`, which is the only declaration its reach
+ * depends on: the type after `for` when the block implements a trait, and the
+ * type after `impl` otherwise, with generic arguments and lifetimes dropped.
+ * `impl From<Buffer> for Writer` is reachable as far as `Writer` is, and a
+ * private `Buffer` it merely converts from says nothing about that.
+ */
+const rustSelfType = ({ decl }: ContainerContext): string | undefined => {
+  const path = /^impl\b(?:\s*<.*?>)?\s+(?:.*\s+for\s+)?([^\s{<]+)/.exec(decl)?.[1];
+  return path === undefined ? undefined : path.split('::').pop()!.replace(/^\W+/, '') || undefined;
+};
 
 /**
  * `public:` / `private:` / `protected:` and the `class` / `struct` / `union`
@@ -172,8 +205,7 @@ const RULES: Record<string, LanguageRule> = {
   ts: {
     visible: (context) => topLevel(context)
       ? /^export\b/.test(context.decl)
-      : !/^[\s]*(?:(?:static|readonly|async|abstract|override|accessor)\s+)*(?:private|protected)\b/.test(context.decl)
-        && !context.name.startsWith('#'),
+      : implicitlyVisible(context),
     scope: withNamespaces('file'),
   },
   // `pub`, including `pub(crate)`: both reach another file, which is what the
@@ -182,6 +214,7 @@ const RULES: Record<string, LanguageRule> = {
   rs: {
     visible: (context) => /^pub\b/.test(context.decl),
     scope: (container) => /^impl\b/.test(container.decl) ? 'group' : withNamespaces('file')(container),
+    subject: rustSelfType,
   },
   // Exported identifiers are capitalised, at every depth including fields. An
   // interface method follows the same rule, so nothing here is implicit.

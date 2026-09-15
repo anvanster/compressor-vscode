@@ -89,8 +89,10 @@ Open src/engine/index.ts and walk me through compress().
 Returned content keeps original line numbers. Source code and comments are
 preserved; repeated log lines may collapse into a marker with an exact
 `offset`/`limit` recovery range. A tool invocation labeled “compressed” does not
-mean the response actually shrank. Whole-file reads can honor a host budget;
-explicit ranges and symbol reads remain exact.
+mean the response actually shrank. Every read is bounded by a token budget —
+the host's when it sends one, a built-in backstop when it does not. An explicit
+range or symbol read is exact as far as it goes and then stops, saying which
+lines it returned.
 
 When a whole file does not fit the host's budget, the reply degrades in detail
 rather than in coverage: if a symbol provider can describe the file, you get the
@@ -198,7 +200,11 @@ Symbol names must resolve uniquely. Do not combine `symbol` with `offset` or
 ### Reading an exact range
 
 When you (or the agent) need a span verbatim, pass `offset` (1-based start line)
-and `limit` (line count) — that range comes back uncompressed:
+and `limit` (line count) — that range comes back verbatim as far as it goes.
+It is still bounded by the token budget: an oversized range stops short, states
+the lines it actually returned, and names the offset to resume from.
+Raising `limit` past that point returns the same bytes, because the budget
+bounds the output and the limit does not.
 
 ```
 Read #compressorRead src/engine/tiers/logs.ts lines 40 to 80 and quote the

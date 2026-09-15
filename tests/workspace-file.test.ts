@@ -80,12 +80,16 @@ describe('spilled tool results', () => {
 describe('unreadable targets name what is wrong', () => {
   it('distinguishes a directory from a size limit', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'compressor-dirmsg-'));
-    await mkdir(path.join(dir, 'src'), { recursive: true });
-    await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
-      .rejects.toThrow(/a directory, not a file/);
-    // a size message for a directory sends the caller looking for a big file
-    await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
-      .rejects.not.toThrow(/8 MB/);
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
+        .rejects.toThrow(/a directory, not a file/);
+      // a size message for a directory sends the caller looking for a big file
+      await expect(readWorkspaceFile(path.join(dir, 'src'), [dir]))
+        .rejects.not.toThrow(/8 MB/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   // The message is a recovery instruction: a model follows it literally, so a

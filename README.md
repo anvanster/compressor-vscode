@@ -23,8 +23,9 @@ the network.
   - **`#compressorRead`** — preserves source code, comments and line numbers;
     repeated log lines can be deduplicated with recoverable
     `[compressor:]` markers stating the exact `offset`/`limit` to retrieve
-    omitted lines. Pass `offset`/`limit` or a unique qualified `symbol` for an
-    exact uncompressed read.
+    omitted lines. Pass `offset`/`limit` or a unique qualified `symbol` for a
+    verbatim range; it stops at the token budget and names the line to resume
+    from.
   - **`#compressorSearch`** — workspace text/regex search returning compressed
     grep-style results (file, line, match). Accepts `isRegex`, `ignoreCase`,
     an `include` glob, `root`, `maxResults`, `skip`, compact `output=files|count`,

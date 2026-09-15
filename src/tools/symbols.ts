@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { visibilityRule } from './visibility';
+import { implicitlyVisible, visibilityRule } from './visibility';
 
 export interface CodeSymbol {
   name: string;
@@ -114,12 +114,12 @@ function visibleNames(
   const rule = visibilityRule(source.path);
   const visible = new Set<string>();
   if (rule === undefined) return visible;
-  // A grouping names what it groups — `impl Foo` — and reaches exactly as far
-  // as that symbol does, so a file-scope name the rule already rejected closes
-  // the group with it.
+  // A grouping borrows the reach of the type it names, so a file-scope type
+  // the rule already rejected closes the group with it.
   const rejected = new Set<string>();
   const walk = (
-    nodes: readonly CodeSymbol[], parent: string, containerStart: number, inherited = false,
+    nodes: readonly CodeSymbol[], parent: string, containerStart: number,
+    implicitFrom?: vscode.SymbolKind,
   ): void => {
     for (const symbol of nodes) {
       const name = parent ? `${parent}.${symbol.name}` : symbol.name;
@@ -128,28 +128,37 @@ function visibleNames(
       // The whole line: a keyword like `export` or `static` sits to the left of
       // the name, so slicing at the name's column would discard it.
       const decl = line.trim();
-      const scope = rule.scope({ kind: symbol.kind, decl });
+      const container = { kind: symbol.kind, decl };
+      const scope = rule.scope(container);
       if (scope === 'group') {
-        const words = new Set(decl.split(/\W+/));
-        if (![...rejected].some((hidden) => words.has(hidden))) walk(symbol.children, name, 0);
+        const subject = rule.subject?.(container);
+        if (subject === undefined || !rejected.has(subject)) walk(symbol.children, name, 0);
         continue;
       }
-      const ok = inherited || rule.visible({
+      const context = {
         name: symbol.name,
         decl,
         start: symbol.declLine,
         containerStart,
         column: symbol.column,
         lines: source.lines,
-      });
+      };
+      // An enum grants its constants default visibility and nothing else: its
+      // fields, constructors and methods are ordinary class members.
+      const implicit = implicitFrom !== undefined
+        && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
+      const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
       if (!ok) {
         // an invisible container hides everything under it
-        if (containerStart === 0) rejected.add(symbol.name);
+        if (parent === '' && scope !== undefined) rejected.add(symbol.name);
         continue;
       }
       visible.add(name);
       if (scope !== undefined) {
-        walk(symbol.children, name, scope === 'file' ? 0 : symbol.declLine, scope === 'implicit');
+        walk(
+          symbol.children, name, scope === 'file' ? 0 : symbol.declLine,
+          scope === 'implicit' ? symbol.kind : undefined,
+        );
       }
     }
   };

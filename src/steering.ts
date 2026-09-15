@@ -68,7 +68,7 @@ export function userAgentPath(home: string = os.homedir()): string {
  * install should pick up. Stamped into owned files so an install can say what
  * it replaced, and so `status` can name the revision on disk.
  */
-export const STEERING_REVISION = 5;
+export const STEERING_REVISION = 6;
 
 const OWNED_MARKER_PREFIX = '<!-- compressor-vscode:owned';
 const OWNED_MARKER_RE = /<!-- compressor-vscode:owned v=(\d+) -->/;
@@ -138,8 +138,10 @@ Always inspect exit status. Use \`compressorLog\` to retrieve omitted output
 instead of rerunning commands. Do not use execution to bypass file boundaries.
 Never use it to print a file (\`cat\`, \`head\`, \`sed -n\`): command output is
 summarized for diagnostics, so a file read that way comes back sampled rather
-than whole. \`compressorRead\` returns the range you asked for and states its
-coverage. Editing files works normally.
+than whole. \`compressorRead\` returns the range you asked for, verbatim as far as it
+goes, and states the lines it actually returned; a range too large for the
+budget stops short, and raising \`limit\` returns the same bytes rather than
+more of them. Editing files works normally.
 
 ## State only what the tools actually returned
 
