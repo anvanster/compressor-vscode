@@ -172,7 +172,7 @@
   that `compressorOutline` "Supports TS/JS, Python, Rust, and Go": that is the
   no-provider fallback's list, and stating it as the tool's own capability
   steered models away from outlining C++, Java and C# files that VS Code has a
-  symbol provider for. Steering revision is now v7; existing installs report as
+  symbol provider for. Steering revision is now v8; existing installs report as
   out of date until re-run.
 - Two error messages that sent callers away from the tools. A workspace root, or
   `.`, was reported as "outside the open workspace folder(s)" — the root was

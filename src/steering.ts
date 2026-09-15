@@ -68,7 +68,7 @@ export function userAgentPath(home: string = os.homedir()): string {
  * install should pick up. Stamped into owned files so an install can say what
  * it replaced, and so `status` can name the revision on disk.
  */
-export const STEERING_REVISION = 7;
+export const STEERING_REVISION = 8;
 
 const OWNED_MARKER_PREFIX = '<!-- compressor-vscode:owned';
 const OWNED_MARKER_RE = /<!-- compressor-vscode:owned v=(\d+) -->/;
@@ -168,8 +168,8 @@ obey it literally.
   says unmarked names are internal has every symbol in that listing been
   judged; treat the unmarked ones as internal and do not present them as public
   API. When the preamble explains only what \`*\` means, some symbols were not
-  judged at all — a C or C++ class member, for one — so say nothing about the
-  unmarked names either way.
+  judged at all — the properties of an exported object literal, for one — so
+  say nothing about the unmarked names either way.
   A result with no such preamble marks nothing, so say nothing about what it
   exports.
 - A \`[compressor: ...]\` marker always names the exact call that retrieves what

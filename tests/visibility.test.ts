@@ -146,6 +146,36 @@ describe('C and C++ visibility', () => {
     expect(marked.some((line) => line.startsWith('*Widget.Impl'))).toBe(false);
   });
 
+  // `struct sockaddr_in addr_;` names the field's type, not a scope. Reading
+  // that keyword as an opener returned `struct`'s public default and the scan
+  // stopped before it ever reached the `private:` above — a private member
+  // shipped as API under a legend that says marks are the public surface.
+  it('does not read an elaborated type specifier as an access scope', () => {
+    const cpp = [
+      'class Socket {',
+      'private:',
+      '  struct sockaddr_in addr_;',
+      '  union Storage store_;',
+      '  void connectTo();',
+      '};',
+    ].join('\n');
+    expect(exported('s.hpp', cpp, [['Socket', ['addr_', 'store_', 'connectTo']]]))
+      .toEqual(['Socket']);
+  });
+
+  // The same root cause one line up: a field the provider never reported is
+  // not in `siblings`, so the scan met its `struct` and stopped there.
+  it('does not read an unreported field line as an access scope', () => {
+    const cpp = [
+      'class Widget {',
+      'private:',
+      '  struct Impl* impl_;',
+      '  void layout();',
+      '};',
+    ].join('\n');
+    expect(exported('w.hpp', cpp, [['Widget', ['layout']]])).toEqual(['Widget']);
+  });
+
   it('does not mark a private pimpl pointer or its forward declaration', () => {
     const cpp = [
       'class Widget {',

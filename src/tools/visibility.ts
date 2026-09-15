@@ -246,10 +246,13 @@ const cFamily: Rule = (context) => {
     const label = ACCESS_LABEL.exec(text);
     if (label) return label[1] === 'public';
     const open = TYPE_OPENER.exec(text);
-    // `class` defaults to private, `struct` and `union` to public. An opener
-    // with nothing but whitespace between it and the name is this symbol's own
-    // declaration rather than the scope it sits in, so keep looking outward.
-    if (open && text.slice(open[0].length).trim() !== '') return open[1] !== 'class';
+    // `class` defaults to private, `struct` and `union` to public — but only
+    // the container's own declaration line carries the opener that sets that
+    // default. Anywhere else the keyword belongs to the declaration it sits on:
+    // `struct sockaddr_in addr_;` names a field's type, and reading it as a
+    // scope returned `struct`'s public default before the scan ever reached
+    // the `private:` above. One line, one owner.
+    if (open && index === containerStart) return open[1] !== 'class';
   }
   return true;
 };

@@ -25,12 +25,6 @@ export interface CodeSymbol {
   children: CodeSymbol[];
 }
 
-/** A symbol lifted out of the tree, keeping where its enclosing symbol began. */
-export interface FlatSymbol extends CodeSymbol {
-  /** 1-based start line of the enclosing symbol; 0 at file scope. */
-  containerStart: number;
-}
-
 export async function documentSymbols(file: string): Promise<CodeSymbol[]> {
   const result = await vscode.commands.executeCommand<(vscode.DocumentSymbol | vscode.SymbolInformation)[]>(
     'vscode.executeDocumentSymbolProvider', vscode.Uri.file(file),
@@ -54,14 +48,11 @@ export async function documentSymbols(file: string): Promise<CodeSymbol[]> {
 }
 
 export function flattenSymbols(
-  symbols: readonly CodeSymbol[], parent = '', containerStart = 0,
-): FlatSymbol[] {
+  symbols: readonly CodeSymbol[], parent = '',
+): CodeSymbol[] {
   return symbols.flatMap((symbol) => {
     const name = parent ? `${parent}.${symbol.name}` : symbol.name;
-    return [
-      { ...symbol, name, containerStart },
-      ...flattenSymbols(symbol.children, name, symbol.start),
-    ];
+    return [{ ...symbol, name }, ...flattenSymbols(symbol.children, name)];
   });
 }
 
