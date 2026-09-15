@@ -141,9 +141,14 @@
   from the TypeScript compiler over five of this extension's own files agree
   with their `export` lines exactly, and every file-scope verdict on a compiled
   C++ translation unit agrees with `nm`'s own internal/external linkage.
-  The mark reports declared visibility, not linkage: a `private:` C++ member
-  has external linkage but is not marked, which is the distinction a caller
-  reading the outline needs.
+  C and C++ **members** are deliberately not evaluated. Which `public:` section
+  a member belongs to depends on brace nesting, comments, string literals and
+  the preprocessor; every attempt to settle it from one declaration line marked
+  private members as public API, so a C or C++ class is marked by its own
+  linkage and its members are listed without a verdict.
+  A listing that contains symbols no rule judged says so: its preamble explains
+  what `*` means and stops, instead of adding that unmarked names are internal
+  — a claim that only holds when every symbol was judged.
   Visibility is read from `selectionRange`, the name, rather than `range`:
   `range` covers "everything else, e.g. comments and code", so for a documented
   symbol it begins at the opening comment and a rule reading its first line

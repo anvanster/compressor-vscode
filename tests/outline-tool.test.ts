@@ -8,6 +8,7 @@ import type { LedgerEvent } from '@astudioplus/compressor';
 import { SymbolKind } from 'vscode';
 import { retargetMarkers, runOutlineTool } from '../src/tools/outline';
 import type { ReadToolDeps } from '../src/tools/read';
+import type { CodeSymbol } from '../src/tools/symbols';
 import { tempDir } from './fixtures';
 
 const WS = '/ws/project';
@@ -144,6 +145,54 @@ describe('outline honesty', () => {
     expect(outcome.text).toContain('signatures only, bodies omitted');
     expect(outcome.text).toContain('compressor_read');
     expect(outcome.text).toContain('Service.run0');
+  });
+
+  // End to end: a C++ header marks the file-scope class, marks none of its
+  // members, and the preamble stops at what `*` means — the members were never
+  // judged, so "unmarked names are internal" would be a claim about symbols no
+  // rule looked at.
+  it('outlines a C++ header without claiming its unmarked members are internal', async () => {
+    // inline bodies, so the listing genuinely beats the source and the outline
+    // is what comes back rather than the header itself
+    const COUNT = 40;
+    const header = [
+      'class Widget {',
+      'public:',
+      ...Array.from({ length: COUNT }, (_, i) => [
+        `  void member${i}() {`,
+        `    doSomethingFairlyVerbose(${i});`,
+        '  }',
+      ]).flat(),
+      '};',
+    ].join('\n');
+    const outcome = await runOutlineTool({ path: 'src/widget.hpp' }, deps(header, {
+      symbols: async () => [{
+        name: 'Widget', detail: '', kind: SymbolKind.Class,
+        column: 6, declLine: 1, start: 1, end: COUNT * 3 + 3,
+        children: Array.from({ length: COUNT }, (_, i): CodeSymbol => ({
+          name: `member${i}`, detail: '()', kind: SymbolKind.Method,
+          column: 7, declLine: i * 3 + 3, start: i * 3 + 3, end: i * 3 + 5, children: [],
+        })),
+      }],
+    }));
+    expect(outcome.text).toContain('*Widget ');
+    expect(outcome.text).not.toMatch(/^\*Widget\./m);
+    expect(outcome.text).toContain('visible outside this file');
+    expect(outcome.text).not.toContain('do not list them as its API');
+  });
+
+  it('keeps the unmarked-names claim for a listing it judged throughout', async () => {
+    const source = Array.from(
+      { length: 40 },
+      (_, i) => `export function exportedNumber${i}(): void {\n  doSomethingFairlyVerbose(${i});\n}`,
+    ).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/api.ts' }, deps(source, {
+      symbols: async () => Array.from({ length: 40 }, (_, i) => ({
+        name: `exportedNumber${i}`, detail: '(): void', kind: SymbolKind.Function,
+        column: 16, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+      })),
+    }));
+    expect(outcome.text).toContain('do not list them as its API');
   });
 
   // The tool description and the steering both tie their claim about `*` to

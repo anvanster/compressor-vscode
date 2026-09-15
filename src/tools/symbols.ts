@@ -71,8 +71,20 @@ export interface SymbolSource {
   lines: readonly string[];
 }
 
-const LEGEND =
-  '* = visible outside this file or its class; unmarked names are internal to it, so do not list them as its API. ';
+const MARK_MEANS = '* = visible outside this file or its class. ';
+const UNMARKED_MEANS = 'Unmarked names are internal to it, so do not list them as its API. ';
+
+/** A symbol listing, and whether a rule reached every symbol in it. */
+export interface SymbolListing {
+  /** One line per symbol, marked where a rule found it visible. */
+  text: string;
+  /**
+   * true when a rule produced a verdict for every symbol listed. When false,
+   * an unmarked name may simply be one no rule could judge, so nothing can be
+   * concluded from the absence of a mark.
+   */
+  complete: boolean;
+}
 
 /**
  * One sentence for the preamble explaining the `*` in formatted output, or ''
@@ -86,9 +98,14 @@ const LEGEND =
  * formatted text rather than the language keeps the two in step — the sentence
  * costs budget that a structure listing needs, so it is never spent on a
  * legend for a mark that does not appear.
+ *
+ * What an unmarked name means is a second claim, and only a listing every rule
+ * reached can support it. A C++ header lists members no rule judged, so there
+ * the legend says what `*` means and stops.
  */
-export function exportLegend(formatted: string): string {
-  return /^\*/m.test(formatted) ? LEGEND : '';
+export function exportLegend(listing: SymbolListing): string {
+  if (!/^\*/m.test(listing.text)) return '';
+  return listing.complete ? MARK_MEANS + UNMARKED_MEANS : MARK_MEANS;
 }
 
 /**
@@ -98,7 +115,8 @@ export function exportLegend(formatted: string): string {
  * class is, so a symbol is marked only when every enclosing symbol is. Without
  * a source, or in a language with no rule, nothing is marked.
  */
-export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSource): string {
+export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSource): SymbolListing {
+  let complete = true;
   const entry = (symbol: CodeSymbol, name: string, visible: boolean): string =>
     `${visible ? '*' : ''}${name}${symbol.detail ? ` ${symbol.detail}` : ''} [lines ${symbol.start}-${symbol.end}; offset=${symbol.start} limit=${symbol.end - symbol.start + 1}]`;
 
@@ -113,7 +131,9 @@ export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSou
     });
 
   const rule = source === undefined ? undefined : visibilityRule(source.path);
-  if (rule === undefined || source === undefined) return listed(symbols, '').join('\n');
+  if (rule === undefined || source === undefined) {
+    return { text: listed(symbols, '').join('\n'), complete: false };
+  }
 
   const walk = (
     nodes: readonly CodeSymbol[], parent: string, containerStart: number,
@@ -121,7 +141,10 @@ export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSou
   ): string[] => nodes.flatMap((symbol) => {
     const name = parent ? `${parent}.${symbol.name}` : symbol.name;
     const line = source.lines[symbol.declLine - 1];
-    if (line === undefined) return [entry(symbol, name, false), ...listed(symbol.children, name)];
+    if (line === undefined) {
+      complete = false;
+      return [entry(symbol, name, false), ...listed(symbol.children, name)];
+    }
     // The whole line: a keyword like `export` or `static` sits to the left of
     // the name, so slicing at the name's column would discard it.
     const decl = line.trim();
@@ -143,11 +166,15 @@ export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSou
     const implicit = implicitFrom !== undefined
       && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
     const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
-    // an invisible container hides everything under it
+    // an invisible container hides everything under it — a verdict of its own
     if (!ok) return [entry(symbol, name, false), ...listed(symbol.children, name)];
+    // `undefined` is not a container: what it declares are locals, which no
+    // rule needs to reach. `unevaluated` is a container whose members no rule
+    // can judge, which the listing has to own up to.
+    if (scope === 'unevaluated' && symbol.children.length > 0) complete = false;
     return [
       entry(symbol, name, true),
-      ...(scope === undefined
+      ...(scope === undefined || scope === 'unevaluated'
         ? listed(symbol.children, name)
         : walk(
           symbol.children, name, scope === 'file' ? 0 : symbol.declLine,
@@ -156,5 +183,6 @@ export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSou
     ];
   });
 
-  return walk(symbols, '', 0).join('\n');
+  const text = walk(symbols, '', 0).join('\n');
+  return { text, complete };
 }

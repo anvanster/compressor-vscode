@@ -94,14 +94,14 @@ export async function runOutlineTool(
         `${input.path}: signatures only, bodies omitted. ${legend}` +
         'Read a range with compressor_read before describing what any of it does.\n';
       const head = preamble(exportLegend(body));
-      const formatted = head + body;
+      const formatted = head + body.text;
       const capped = await fitOutput(formatted, budgeted, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
       // The legend is settled a second time against the listing that survived
       // the cap, by rebuilding the preamble this code composed. A file whose
       // marks all sit below the cut would otherwise ship "unmarked names are
       // internal" over a listing with no marks left to exempt.
       const listed = capped.startsWith(head) ? capped.slice(head.length) : undefined;
-      const candidate = listed !== undefined && exportLegend(listed) === ''
+      const candidate = listed !== undefined && exportLegend({ ...body, text: listed }) === ''
         ? preamble('') + listed
         : capped;
       // The cap applies to whichever of the two is chosen. Selecting first and

@@ -141,7 +141,7 @@ export async function completeStructure(
     'nothing dropped to fit the budget. ' + exportLegend(body) +
     'Bodies are not included — read one with ' +
     `compressor_read ${requested} offset=N limit=M.]\n` +
-    body;
+    body.text;
 }
 
 /**

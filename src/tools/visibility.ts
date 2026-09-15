@@ -18,6 +18,13 @@ import * as vscode from 'vscode';
  * for in a form one line can resolve. Unknown extensions mark nothing at all.
  * Under-marking is the safe direction: the caller reads unmarked code rather
  * than trusting a wrong summary.
+ *
+ * C and C++ members are not evaluated at all. The `public:` section a member
+ * belongs to is a question about brace nesting, comments, string literals and
+ * the preprocessor, and answering it from one line marked private members as
+ * public API in every shape it was tried on. A listing that contains
+ * unevaluated symbols says so, so the legend can stop claiming an unmarked
+ * name is internal.
  */
 
 /** One symbol, with the context its visibility rule needs. */
@@ -70,7 +77,13 @@ export type MemberScope =
    * A grouping rather than a scope: the container is not itself a symbol and is
    * never marked, and its children are judged at file scope.
    */
-  | 'group';
+  | 'group'
+  /**
+   * No rule can answer for these members, so none is applied: they are listed
+   * without a mark, and the listing reports itself as incomplete so the legend
+   * does not claim an unmarked name is internal.
+   */
+  | 'unevaluated';
 
 export interface LanguageRule {
   visible: (context: VisibilityContext) => boolean;
@@ -150,52 +163,29 @@ export const implicitlyVisible = (context: VisibilityContext): boolean =>
   !/\b(?:private|protected)\b/.test(beforeName(context)) && !context.name.startsWith('#');
 
 /**
- * `public:` / `private:` / `protected:` and the `class` / `struct` / `union`
- * that opens their scope. A member's own line is searched only up to its start
- * column, so `class T { void hidden(); public: void shown(); };` resolves both
- * members correctly rather than giving them whichever label comes last.
- */
-const ACCESS_LABEL = /.*\b(public|private|protected)\s*:(?![:\w])/;
-const TYPE_OPENER = /^\s*(?:template\s*<[^>]*>\s*)?(class|struct|union)\b/;
-
-/**
- * C and C++ have no `export` keyword outside C++20 modules, so the rule runs
- * the other way round: a symbol is visible unless something hides it. At file
- * scope that is `static` (internal linkage) or an anonymous namespace; inside
- * a class it is the access section the member sits in.
- *
- * `static` means two unrelated things depending on scope — internal linkage at
- * file scope, a static member inside a class, which is usually public — so the
- * linkage test must never run on a member.
- */
-/**
  * `namespace {` with no name. Its contents have internal linkage, and so does
  * the namespace itself — nothing outside the file can name either.
  */
 const anonymousNamespace = (line: string): boolean =>
   /^\s*namespace\s*\{/.test(line) || /^\s*namespace\s*$/.test(line.trimEnd());
 
+/**
+ * C and C++ have no `export` keyword outside C++20 modules, so the rule runs
+ * the other way round: a file-scope symbol is visible unless `static` gives it
+ * internal linkage or an anonymous namespace encloses it.
+ *
+ * Members are a different question, and one line cannot answer it. Which
+ * `public:` / `private:` section a member sits in depends on brace nesting,
+ * comments, string literals and the preprocessor — a C++ lexer, which this
+ * module is deliberately not. Three rounds of approximating it each marked
+ * private members as API, so members are left unevaluated instead.
+ */
 const cFamily: Rule = (context) => {
-  const { decl, lines, start, containerStart, column } = context;
+  const { decl, lines, start } = context;
   if (anonymousNamespace(decl)) return false;
-  if (topLevel(context)) {
-    const previous = lines[start - 2] ?? '';
-    // A declaration may put `static` alone on the line above its name.
-    return !/^\s*static\b/.test(decl) && !/^\s*static\s*$/.test(previous.trimEnd());
-  }
-  for (let index = start; index >= containerStart; index -= 1) {
-    const text = index === start ? (lines[index - 1] ?? '').slice(0, column) : (lines[index - 1] ?? '');
-    const label = ACCESS_LABEL.exec(text);
-    if (label) return label[1] === 'public';
-    const open = TYPE_OPENER.exec(text);
-    // `class` defaults to private, `struct` and `union` to public. An opener
-    // with nothing but whitespace between it and the name is this symbol's own
-    // declaration rather than the scope it sits in — a nested `struct Impl`
-    // would otherwise report its own default instead of the `private:` section
-    // holding it — so keep scanning outward for the section that governs it.
-    if (open && text.slice(open[0].length).trim() !== '') return open[1] !== 'class';
-  }
-  return true;
+  const previous = lines[start - 2] ?? '';
+  // A declaration may put `static` alone on the line above its name.
+  return !/^\s*static\b/.test(decl) && !/^\s*static\s*$/.test(previous.trimEnd());
 };
 
 const RULES: Record<string, LanguageRule> = {
@@ -237,11 +227,16 @@ const RULES: Record<string, LanguageRule> = {
   },
   c: {
     visible: cFamily,
-    // An anonymous namespace is a boundary, not a grouping: its contents have
-    // internal linkage, and cFamily already refuses it and everything under it.
-    scope: (container) => anonymousNamespace(container.decl)
-      ? 'member'
-      : withNamespaces('group')(container),
+    // A named namespace re-opens file scope, where the linkage rule applies. An
+    // anonymous one is a boundary rather than a grouping: cFamily refuses it,
+    // and refusing the container hides everything under it. Everything else
+    // that holds members — a class, struct, union or enum — holds members this
+    // module cannot judge.
+    scope: (container) => {
+      if (anonymousNamespace(container.decl)) return 'unevaluated';
+      const scope = withNamespaces('group')(container);
+      return scope === undefined || scope === 'group' ? scope : 'unevaluated';
+    },
   },
 };
 

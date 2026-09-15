@@ -20,7 +20,7 @@ it('uses the supplied tokenizer to reject token-expanding candidates', async () 
 });
 
 it('includes nested symbols with exact ranges', () => {
-  expect(formatSymbols([{ name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 20, children: [{ name: 'run', detail: '(value: string)', kind: SymbolKind.Method, column: 0, declLine: 3, start: 3, end: 8, children: [] }] }])).toContain('Service.run (value: string) [lines 3-8; offset=3 limit=6]');
+  expect(formatSymbols([{ name: 'Service', detail: '', kind: SymbolKind.Class, column: 0, declLine: 1, start: 1, end: 20, children: [{ name: 'run', detail: '(value: string)', kind: SymbolKind.Method, column: 0, declLine: 3, start: 3, end: 8, children: [] }] }]).text).toContain('Service.run (value: string) [lines 3-8; offset=3 limit=6]');
 });
 
 it('fits complete output including recovery text to a model budget', async () => {

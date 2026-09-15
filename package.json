@@ -248,7 +248,7 @@
                 "toolReferenceName": "compressorOutline",
                 "displayName": "Code Outline",
                 "canBeReferencedInPrompt": true,
-                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. When the preamble explains a leading *, that mark separates the file's externally visible declarations from its internal helpers; a file in a language with no visibility rule carries neither the mark nor that sentence, and says nothing either way about its public surface. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
+                "modelDescription": "Discover source symbols, nested methods, provider-supplied signatures and exact ranges. When the preamble explains a leading *, that mark names declarations found to be visible outside the file. Only when the preamble also says unmarked names are internal was every symbol judged; otherwise some were not evaluated (C and C++ class members are not) and nothing follows from a missing mark. A language with no visibility rule carries neither the mark nor the preamble. Read implementation with compressor_read using symbol or offset/limit. Falls back to a basic TS/JS, Python, Rust or Go outline when no language provider is available. Never replaces content with a larger outline. Workspace-confined.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

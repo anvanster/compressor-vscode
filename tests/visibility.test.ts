@@ -47,7 +47,7 @@ function symbolsFor(source: string, spec: readonly Spec[]): CodeSymbol[] {
 /** Names carrying the `*` mark, unqualified. */
 function exported(path: string, source: string, spec: readonly Spec[]): string[] {
   const lines = source.split('\n');
-  return formatSymbols(symbolsFor(source, spec), { path, lines })
+  return formatSymbols(symbolsFor(source, spec), { path, lines }).text
     .split('\n')
     .filter((line) => line.startsWith('*'))
     // a provider name can contain a space (`impl Foo`), so cut at the range
@@ -70,79 +70,39 @@ describe('C and C++ visibility', () => {
     ])).toEqual(['publicFn', 'gShared']);
   });
 
-  it('honours access sections, including a class opened on a member line', () => {
+  // Members are no longer evaluated: which access section a member sits in is a
+  // question about brace nesting, comments and the preprocessor, and answering
+  // it from one line marked private members as API in every shape tried. The
+  // file-scope type is still judged by its linkage.
+  it('marks a file-scope class but none of its members', () => {
     const cpp = [
       'class Widget {',
-      '  int privateByDefault_;',
       'public:',
       '  void render();',
       'private:',
-      '  void layout();',
+      '  class Guard { public: ~Guard(); };',
+      '  struct Impl;',
+      '  Impl* impl_;',
+      '  int count_;',
       '};',
-      'struct Point {',
-      '  int x;',
-      '};',
-      'class Tight { void hidden(); public: void shown(); };',
+      'static class Hidden { public: void go(); } hidden;',
     ].join('\n');
     expect(exported('w.hpp', cpp, [
-      ['Widget', ['privateByDefault_', 'render', 'layout']],
-      ['Point', ['x']],
-      ['Tight', ['hidden', 'shown']],
-    ])).toEqual(['Widget', 'render', 'Point', 'x', 'Tight', 'shown']);
+      ['Widget', ['render', ['Guard', SymbolKind.Class], ['Impl', SymbolKind.Struct], 'impl_', 'count_']],
+    ])).toEqual(['Widget']);
+    expect(exported('w.hpp', cpp, [['Hidden', [], SymbolKind.Class]])).toEqual([]);
   });
 
-  it('does not mistake a static member for internal linkage', () => {
-    const cpp = ['class Counter {', 'public:', '  static int total();', '};'].join('\n');
-    expect(exported('c.cpp', cpp, [['Counter', ['total']]])).toEqual(['Counter', 'total']);
-  });
-
-  // clangd reports every constructor of an overload set under the same name,
-  // with the parameter list in `detail`. A mark looked up by name cannot tell
-  // them apart, so the private copy constructor of the non-copyable idiom was
-  // marked from its public siblings.
-  it('marks each member of an overload set by its own access section', () => {
-    const cpp = [
-      'class Widget {',
-      'public:',
-      '  Widget();',
-      '  Widget(int size);',
-      'private:',
-      '  Widget(const Widget& other);',
-      '};',
-    ];
-    const constructor = (detail: string, declLine: number): CodeSymbol => ({
-      name: 'Widget', detail, kind: SymbolKind.Constructor,
-      declLine, column: 2, start: declLine, end: declLine, children: [],
+  // Nothing about an unmarked name follows when members went unjudged, so the
+  // legend has to stop short of claiming they are internal.
+  it('leaves the unmarked-names claim out of a listing it could not finish', () => {
+    const cpp = ['class Widget {', 'private:', '  void layout();', '};'].join('\n');
+    const listing = formatSymbols(symbolsFor(cpp, [['Widget', ['layout']]]), {
+      path: 'w.hpp', lines: cpp.split('\n'),
     });
-    const out = formatSymbols([{
-      name: 'Widget', detail: '', kind: SymbolKind.Class,
-      declLine: 1, column: 6, start: 1, end: 7,
-      children: [constructor('()', 3), constructor('(int size)', 4), constructor('(const Widget &)', 6)],
-    }], { path: 'w.hpp', lines: cpp });
-
-    const members = out.split('\n').filter((line) => line.includes('Widget.Widget'));
-    expect(members).toHaveLength(3);
-    expect(members.filter((line) => line.startsWith('*'))).toHaveLength(2);
-    expect(members.find((line) => line.includes('(const Widget &)'))).not.toMatch(/^\*/);
-  });
-
-  // The scan starts on the symbol's own line, so for a nested type it met that
-  // type's own `struct`/`class` keyword and reported its default access
-  // instead of the section holding it — marking the pimpl idiom's private
-  // `Impl` as part of the class's surface.
-  it('reads a nested type from its access section, not its own keyword', () => {
-    const cpp = [
-      'class Widget {',
-      'private:',
-      '  struct Impl { int x; };',
-      'public:',
-      '  struct Config { int y; };',
-      '  void run();',
-      '};',
-    ].join('\n');
-    expect(exported('w.hpp', cpp, [
-      ['Widget', [['Impl', SymbolKind.Struct], ['Config', SymbolKind.Struct], 'run']],
-    ])).toEqual(['Widget', 'Config', 'run']);
+    expect(listing.complete).toBe(false);
+    expect(exportLegend(listing)).toContain('visible outside this file');
+    expect(exportLegend(listing)).not.toContain('do not list them as its API');
   });
 
   it('hides an anonymous namespace and keeps a named one', () => {
@@ -155,10 +115,11 @@ describe('C and C++ visibility', () => {
       '}',
     ].join('\n');
     expect(exported('n.cpp', cpp, [
-      ['namespace', ['anonInternal']],
-      ['api', ['named']],
+      ['namespace', ['anonInternal'], SymbolKind.Namespace],
+      ['api', ['named'], SymbolKind.Namespace],
     ])).toContain('named');
-    expect(exported('n.cpp', cpp, [['namespace', ['anonInternal']]])).not.toContain('anonInternal');
+    expect(exported('n.cpp', cpp, [['namespace', ['anonInternal'], SymbolKind.Namespace]]))
+      .not.toContain('anonInternal');
   });
 });
 
@@ -515,21 +476,34 @@ describe('degrading', () => {
 
   it('marks nothing and says nothing for an unknown language', () => {
     const out = formatSymbols(symbolsFor('thing', spec), { path: 'a.zig', lines: ['thing'] });
-    expect(out.startsWith('*')).toBe(false);
+    expect(out.text.startsWith('*')).toBe(false);
+    expect(out.complete).toBe(false);
     expect(exportLegend(out)).toBe('');
   });
 
   it('marks nothing when no source is supplied', () => {
     const out = formatSymbols(symbolsFor('thing', spec));
-    expect(out.startsWith('*')).toBe(false);
+    expect(out.text.startsWith('*')).toBe(false);
+    expect(out.complete).toBe(false);
     expect(exportLegend(out)).toBe('');
   });
 
   it('explains the mark only when one is present', () => {
     const marked = formatSymbols(symbolsFor('export const thing = 1;', [['thing', []]]),
       { path: 'a.ts', lines: ['export const thing = 1;'] });
-    expect(marked.startsWith('*')).toBe(true);
+    expect(marked.text.startsWith('*')).toBe(true);
     expect(exportLegend(marked)).toContain('visible outside this file');
-    expect(exportLegend('thing [lines 1-1]')).toBe('');
+    expect(exportLegend({ text: 'thing [lines 1-1]', complete: true })).toBe('');
+  });
+
+  // Every symbol in this file was judged, so the legend can say what an
+  // unmarked name means as well as what a mark means.
+  it('keeps the unmarked-names claim when every symbol was judged', () => {
+    const ts = ['export class Service {', '  private secret() {}', '  run() {}', '}'].join('\n');
+    const listing = formatSymbols(symbolsFor(ts, [['Service', ['secret', 'run']]]), {
+      path: 'a.ts', lines: ts.split('\n'),
+    });
+    expect(listing.complete).toBe(true);
+    expect(exportLegend(listing)).toContain('do not list them as its API');
   });
 });

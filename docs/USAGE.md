@@ -166,7 +166,11 @@ by language extension; an outline is not guaranteed to contain every symbol.
 A leading `*` marks a declaration that is visible outside its file, or outside
 its class for a member, and the outline says so in its own preamble whenever it
 marks anything.
-An unmarked name is internal to that file and is not part of its API.
+Read the preamble for a second sentence: only when it says unmarked names are
+internal was every symbol in that listing judged, and only then does a missing
+`*` mean the name is not part of the API. When the preamble explains just what
+`*` means, some symbols were not evaluated at all and nothing follows from the
+absence of a mark.
 The mark is read from the declaration line — `export`, `pub`, a capitalised Go
 name, an absent Python underscore, `public` for Java and C#, the absence of
 `private`/`protected`/`internal` for Kotlin, Scala and Groovy, and for C and C++
@@ -184,6 +188,11 @@ items are judged by the file-scope `pub` rule.
 That last one has a known cost: a `pub` item in an `impl` on a file-private
 type is marked even though nothing outside the file can reach it, because one
 declaration line cannot say which type an `impl` is for.
+C and C++ **members** are not evaluated at all — only file-scope symbols are.
+Which `public:` section a member sits in depends on brace nesting, comments and
+the preprocessor, which no single line can settle, so a C or C++ class is
+marked by its own linkage while its members are listed without a verdict and
+the preamble drops its claim about unmarked names.
 Languages without a rule are left unmarked entirely, and no preamble claims
 otherwise.
 
