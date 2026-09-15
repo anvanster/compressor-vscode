@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SymbolKind } from 'vscode';
@@ -274,15 +274,22 @@ describe('runReadTool', () => {
     }
   });
 
+  // Against a real directory, with no injected readFile: an earlier version of
+  // this test mocked readFile to throw the sentence it then asserted on, so it
+  // passed whether or not readWorkspaceFile classified directories at all.
   it('says a directory is a directory, and names the tool to reach for', async () => {
-    const outcome = await runReadTool({ path: 'src' }, deps({
-      readFile: async () => { throw new Error('a directory, not a file. Name a file inside it, or find the files under it with compressor_search'); },
-    }));
-    expect(outcome.isError).toBe(true);
-    expect(outcome.text).toContain('a directory, not a file');
-    expect(outcome.text).toContain('compressor_search');
-    // the old wording implied a size limit, which left no next step
-    expect(outcome.text).not.toContain('8 MB');
+    const dir = await tempDir('compressor-readtool-dir-');
+    try {
+      await mkdir(path.join(dir, 'src'), { recursive: true });
+      const outcome = await runReadTool({ path: 'src' }, { workspaceFolders: [dir], mode: 'optimized' });
+      expect(outcome.isError).toBe(true);
+      expect(outcome.text).toContain('a directory, not a file');
+      expect(outcome.text).toContain('compressor_search');
+      // the old wording implied a size limit, which left no next step
+      expect(outcome.text).not.toContain('8 MB');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('tolerates stray whitespace around the path', async () => {

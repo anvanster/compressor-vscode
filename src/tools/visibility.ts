@@ -188,8 +188,12 @@ const cFamily: Rule = (context) => {
     const label = ACCESS_LABEL.exec(text);
     if (label) return label[1] === 'public';
     const open = TYPE_OPENER.exec(text);
-    // `class` defaults to private, `struct` and `union` to public.
-    if (open) return open[1] !== 'class';
+    // `class` defaults to private, `struct` and `union` to public. An opener
+    // with nothing but whitespace between it and the name is this symbol's own
+    // declaration rather than the scope it sits in — a nested `struct Impl`
+    // would otherwise report its own default instead of the `private:` section
+    // holding it — so keep scanning outward for the section that governs it.
+    if (open && text.slice(open[0].length).trim() !== '') return open[1] !== 'class';
   }
   return true;
 };

@@ -329,6 +329,28 @@ describe('the budget is a cap, not a preference', () => {
     expect(events[0]?.transforms).toEqual(['host-budget']);
   });
 
+  // `outlined` is documented as "true when a smaller outline was returned (and
+  // a ledger event fired)". With no provider and a skeleton that loses to the
+  // source, the cap trims the source: a reduction happened, so the ledger has
+  // to carry it, and the transform that applied is the budget, not an outline.
+  it('records the cap when the skeleton loses and the source is trimmed', async () => {
+    // Bodies small enough that each recovery marker costs more than the lines
+    // it replaces: skeleton does collapse them, but the result is no smaller,
+    // so selectOutput keeps the source and the backstop then cuts it.
+    const source = Array.from({ length: 900 }, (_, i) => [
+      `def function_number_${i}(argument):`,
+      `    first_${i} = argument + ${i}`,
+      `    return first_${i}`,
+    ].join('\n')).join('\n');
+    const events = await withLedger(async () => {
+      const outcome = await runOutlineTool({ path: 'src/many.py' }, deps(source));
+      expect(outcome.outlined).toBe(true);
+      expect(cheapEstimator(outcome.text)).toBeLessThanOrEqual(5_000);
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.transforms).toEqual(['host-budget']);
+  });
+
   it('attributes a listing that beat the source to the symbol provider', async () => {
     const source = Array.from(
       { length: 200 },

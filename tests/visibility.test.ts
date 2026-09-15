@@ -126,6 +126,25 @@ describe('C and C++ visibility', () => {
     expect(members.find((line) => line.includes('(const Widget &)'))).not.toMatch(/^\*/);
   });
 
+  // The scan starts on the symbol's own line, so for a nested type it met that
+  // type's own `struct`/`class` keyword and reported its default access
+  // instead of the section holding it — marking the pimpl idiom's private
+  // `Impl` as part of the class's surface.
+  it('reads a nested type from its access section, not its own keyword', () => {
+    const cpp = [
+      'class Widget {',
+      'private:',
+      '  struct Impl { int x; };',
+      'public:',
+      '  struct Config { int y; };',
+      '  void run();',
+      '};',
+    ].join('\n');
+    expect(exported('w.hpp', cpp, [
+      ['Widget', [['Impl', SymbolKind.Struct], ['Config', SymbolKind.Struct], 'run']],
+    ])).toEqual(['Widget', 'Config', 'run']);
+  });
+
   it('hides an anonymous namespace and keeps a named one', () => {
     const cpp = [
       'namespace {',

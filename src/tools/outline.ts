@@ -147,7 +147,14 @@ export async function runOutlineTool(
       await fitOutput(text, budgeted, `read a range with compressor_read ${input.path} offset=N limit=M`) || text;
     if (result.content !== numbered && await selectOutput(numbered, result.content, budgeted) === numbered) {
       const text = await cap(numbered);
-      return { text, isError: false, outlined: text !== numbered };
+      if (text === numbered) return { text, isError: false, outlined: false };
+      void recordEvent({
+        ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
+        charsIn: numbered.length, charsOut: text.length,
+        estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(text),
+        transforms: ['host-budget'],
+      }).catch(() => {});
+      return { text, isError: false, outlined: true };
     }
     if (result.content === numbered || result.transform === undefined) {
       // signature model exists but produced no collapse (tiny file, or all
