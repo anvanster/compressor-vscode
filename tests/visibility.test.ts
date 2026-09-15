@@ -96,6 +96,36 @@ describe('C and C++ visibility', () => {
     expect(exported('c.cpp', cpp, [['Counter', ['total']]])).toEqual(['Counter', 'total']);
   });
 
+  // clangd reports every constructor of an overload set under the same name,
+  // with the parameter list in `detail`. A mark looked up by name cannot tell
+  // them apart, so the private copy constructor of the non-copyable idiom was
+  // marked from its public siblings.
+  it('marks each member of an overload set by its own access section', () => {
+    const cpp = [
+      'class Widget {',
+      'public:',
+      '  Widget();',
+      '  Widget(int size);',
+      'private:',
+      '  Widget(const Widget& other);',
+      '};',
+    ];
+    const constructor = (detail: string, declLine: number): CodeSymbol => ({
+      name: 'Widget', detail, kind: SymbolKind.Constructor,
+      declLine, column: 2, start: declLine, end: declLine, children: [],
+    });
+    const out = formatSymbols([{
+      name: 'Widget', detail: '', kind: SymbolKind.Class,
+      declLine: 1, column: 6, start: 1, end: 7,
+      children: [constructor('()', 3), constructor('(int size)', 4), constructor('(const Widget &)', 6)],
+    }], { path: 'w.hpp', lines: cpp });
+
+    const members = out.split('\n').filter((line) => line.includes('Widget.Widget'));
+    expect(members).toHaveLength(3);
+    expect(members.filter((line) => line.startsWith('*'))).toHaveLength(2);
+    expect(members.find((line) => line.includes('(const Widget &)'))).not.toMatch(/^\*/);
+  });
+
   it('hides an anonymous namespace and keeps a named one', () => {
     const cpp = [
       'namespace {',
@@ -207,6 +237,31 @@ describe('other languages', () => {
     ].join('\n');
     expect(exported('Box.scala', scala, [['Box', ['open', 'latch', 'lid']]]))
       .toEqual(['Box', 'open']);
+  });
+
+  // A comma inside `<...>` separates type arguments, not parameters. Cutting
+  // the prefix there dropped the `private` in front of the return type and
+  // marked a hidden member as part of the class's surface.
+  it('does not let a comma inside generic arguments swallow the keyword', () => {
+    const groovy = [
+      'class Box {',
+      '    private Map<String, Integer> lookup() {}',
+      '    private Map<String, List<Integer>> deepLookup() {}',
+      '    Map<String, Integer> shown() {}',
+      '}',
+    ].join('\n');
+    expect(exported('Box.groovy', groovy, [['Box', ['lookup', 'deepLookup', 'shown']]]))
+      .toEqual(['Box', 'shown']);
+  });
+
+  it('does not let a generic type parameter list swallow the keyword', () => {
+    const kt = [
+      'class Box {',
+      '    private fun <A, B> zip(a: A, b: B) {}',
+      '    fun <A, B> pair(a: A, b: B) {}',
+      '}',
+    ].join('\n');
+    expect(exported('Box.kt', kt, [['Box', ['zip', 'pair']]])).toEqual(['Box', 'pair']);
   });
 
   it('marks a Groovy file', () => {

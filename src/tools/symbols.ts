@@ -92,64 +92,69 @@ export function exportLegend(formatted: string): string {
 }
 
 /**
- * Names the rule calls visible, in the order they appear. Visibility is
- * inherited: a public method of a class the file never exports is no more
- * reachable from outside than the class is, so a symbol is listed only when
- * every enclosing symbol is listed too.
+ * Every symbol the provider reported, one per line, marked with `*` where the
+ * language's rule calls it visible. Visibility is inherited: a public method of
+ * a class the file never exports is no more reachable from outside than the
+ * class is, so a symbol is marked only when every enclosing symbol is. Without
+ * a source, or in a language with no rule, nothing is marked.
  */
-function visibleNames(
-  symbols: readonly CodeSymbol[], source: SymbolSource,
-): Set<string> {
-  const rule = visibilityRule(source.path);
-  const visible = new Set<string>();
-  if (rule === undefined) return visible;
+export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSource): string {
+  const entry = (symbol: CodeSymbol, name: string, visible: boolean): string =>
+    `${visible ? '*' : ''}${name}${symbol.detail ? ` ${symbol.detail}` : ''} [lines ${symbol.start}-${symbol.end}; offset=${symbol.start} limit=${symbol.end - symbol.start + 1}]`;
+
+  // Two symbols can share a qualified name — a C++ overload set reports the
+  // signature in `detail`, not in `name` — so the decision has to travel with
+  // the symbol it was made for. Deciding here, in the walk that flattens,
+  // leaves nothing to look a name up in.
+  const listed = (nodes: readonly CodeSymbol[], parent: string): string[] =>
+    nodes.flatMap((symbol) => {
+      const name = parent ? `${parent}.${symbol.name}` : symbol.name;
+      return [entry(symbol, name, false), ...listed(symbol.children, name)];
+    });
+
+  const rule = source === undefined ? undefined : visibilityRule(source.path);
+  if (rule === undefined || source === undefined) return listed(symbols, '').join('\n');
+
   const walk = (
     nodes: readonly CodeSymbol[], parent: string, containerStart: number,
     implicitFrom?: vscode.SymbolKind,
-  ): void => {
-    for (const symbol of nodes) {
-      const name = parent ? `${parent}.${symbol.name}` : symbol.name;
-      const line = source.lines[symbol.declLine - 1];
-      if (line === undefined) continue;
-      // The whole line: a keyword like `export` or `static` sits to the left of
-      // the name, so slicing at the name's column would discard it.
-      const decl = line.trim();
-      const container = { kind: symbol.kind, decl };
-      const scope = rule.scope(container);
-      if (scope === 'group') {
-        walk(symbol.children, name, 0);
-        continue;
-      }
-      const context = {
-        name: symbol.name,
-        decl,
-        start: symbol.declLine,
-        containerStart,
-        column: symbol.column,
-        lines: source.lines,
-      };
-      // An enum grants its constants default visibility and nothing else: its
-      // fields, constructors and methods are ordinary class members.
-      const implicit = implicitFrom !== undefined
-        && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
-      const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
-      if (!ok) continue; // an invisible container hides everything under it
-      visible.add(name);
-      if (scope !== undefined) {
-        walk(
+  ): string[] => nodes.flatMap((symbol) => {
+    const name = parent ? `${parent}.${symbol.name}` : symbol.name;
+    const line = source.lines[symbol.declLine - 1];
+    if (line === undefined) return [entry(symbol, name, false), ...listed(symbol.children, name)];
+    // The whole line: a keyword like `export` or `static` sits to the left of
+    // the name, so slicing at the name's column would discard it.
+    const decl = line.trim();
+    const container = { kind: symbol.kind, decl };
+    const scope = rule.scope(container);
+    if (scope === 'group') {
+      return [entry(symbol, name, false), ...walk(symbol.children, name, 0)];
+    }
+    const context = {
+      name: symbol.name,
+      decl,
+      start: symbol.declLine,
+      containerStart,
+      column: symbol.column,
+      lines: source.lines,
+    };
+    // An enum grants its constants default visibility and nothing else: its
+    // fields, constructors and methods are ordinary class members.
+    const implicit = implicitFrom !== undefined
+      && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
+    const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
+    // an invisible container hides everything under it
+    if (!ok) return [entry(symbol, name, false), ...listed(symbol.children, name)];
+    return [
+      entry(symbol, name, true),
+      ...(scope === undefined
+        ? listed(symbol.children, name)
+        : walk(
           symbol.children, name, scope === 'file' ? 0 : symbol.declLine,
           scope === 'implicit' ? symbol.kind : undefined,
-        );
-      }
-    }
-  };
-  walk(symbols, '', 0);
-  return visible;
-}
+        )),
+    ];
+  });
 
-export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSource): string {
-  const visible = source === undefined ? new Set<string>() : visibleNames(symbols, source);
-  return flattenSymbols(symbols).map((symbol) =>
-    `${visible.has(symbol.name) ? '*' : ''}${symbol.name}${symbol.detail ? ` ${symbol.detail}` : ''} [lines ${symbol.start}-${symbol.end}; offset=${symbol.start} limit=${symbol.end - symbol.start + 1}]`,
-  ).join('\n');
+  return walk(symbols, '', 0).join('\n');
 }

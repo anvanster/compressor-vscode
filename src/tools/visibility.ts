@@ -115,16 +115,31 @@ const withNamespaces = (namespaces: MemberScope) =>
   };
 
 /**
- * The modifiers that qualify this name and no other: the declaration line from
- * the nearest `(` or `,` before the name up to the name itself. A keyword to
- * the right belongs to a later declaration, and one to the left of an earlier
- * parameter belongs to that parameter — `class Foo(private val a: A, val b: B)`
- * declares a public `b`. With no delimiter the whole prefix qualifies the name,
- * so `class Box(...)` still reads its own `class `.
+ * The modifiers that qualify this name and no other: the declaration line back
+ * to the `(` that opens the parameter list or the `,` that ends the previous
+ * parameter, whichever comes last. A keyword to the right belongs to a later
+ * declaration, and one to the left of an earlier parameter belongs to that
+ * parameter — `class Foo(private val a: A, val b: B)` declares a public `b`.
+ *
+ * The scan tracks bracket depth, because a `,` inside `<>`, `[]`, `()` or `{}`
+ * separates type arguments rather than parameters: cutting at the comma in
+ * `private Map<String, Integer> lookup()` leaves `Integer>`, drops the
+ * `private`, and marks a hidden member as API. With no delimiter at depth zero
+ * the whole prefix qualifies the name, so `class Box(...)` reads its `class `.
  */
 const beforeName = (context: VisibilityContext): string => {
   const prefix = (context.lines[context.start - 1] ?? '').slice(0, context.column);
-  return prefix.slice(Math.max(prefix.lastIndexOf('('), prefix.lastIndexOf(',')) + 1);
+  let depth = 0;
+  for (let index = prefix.length - 1; index >= 0; index -= 1) {
+    const character = prefix[index];
+    if (character === '>' || character === ')' || character === ']' || character === '}') depth += 1;
+    else if (character === '<' || character === '[' || character === '{') depth = Math.max(0, depth - 1);
+    else if (character === '(') {
+      if (depth === 0) return prefix.slice(index + 1);
+      depth -= 1;
+    } else if (character === ',' && depth === 0) return prefix.slice(index + 1);
+  }
+  return prefix;
 };
 
 /**
@@ -168,10 +183,6 @@ const cFamily: Rule = (context) => {
     // A declaration may put `static` alone on the line above its name.
     return !/^\s*static\b/.test(decl) && !/^\s*static\s*$/.test(previous.trimEnd());
   }
-  // A provider that reports the anonymous namespace as a container gives us an
-  // enclosing symbol to test. One that flattens it past us falls through to the
-  // access scan, which lands on "visible" — the safe direction.
-  if (anonymousNamespace(lines[containerStart - 1] ?? '')) return false;
   for (let index = start; index >= containerStart; index -= 1) {
     const text = index === start ? (lines[index - 1] ?? '').slice(0, column) : (lines[index - 1] ?? '');
     const label = ACCESS_LABEL.exec(text);

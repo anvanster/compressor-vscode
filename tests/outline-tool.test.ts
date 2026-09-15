@@ -1,12 +1,39 @@
 process.env.COMPRESSOR_NO_LEDGER = '1'; // never touch the real ledger from tests
 
+import { readFile, readdir, rm } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { OMISSION_MARKER, cheapEstimator } from '@astudioplus/compressor';
+import { OMISSION_MARKER, cheapEstimator, settleLedger } from '@astudioplus/compressor';
+import type { LedgerEvent } from '@astudioplus/compressor';
 import { SymbolKind } from 'vscode';
 import { retargetMarkers, runOutlineTool } from '../src/tools/outline';
 import type { ReadToolDeps } from '../src/tools/read';
+import { tempDir } from './fixtures';
 
 const WS = '/ws/project';
+
+/** Run with the ledger switched on into a temp dir, and return what it wrote. */
+async function withLedger(run: () => Promise<void>): Promise<LedgerEvent[]> {
+  const dir = await tempDir('compressor-outline-ledger-');
+  delete process.env['COMPRESSOR_NO_LEDGER'];
+  process.env['COMPRESSOR_LEDGER_DIR'] = dir;
+  try {
+    await run();
+    await settleLedger();
+    const events: LedgerEvent[] = [];
+    for (const file of await readdir(dir)) {
+      for (const line of (await readFile(path.join(dir, file), 'utf8')).split('\n')) {
+        if (line.trim() !== '') events.push(JSON.parse(line) as LedgerEvent);
+      }
+    }
+    return events;
+  } finally {
+    await settleLedger();
+    delete process.env['COMPRESSOR_LEDGER_DIR'];
+    process.env['COMPRESSOR_NO_LEDGER'] = '1';
+    await rm(dir, { recursive: true, force: true });
+  }
+}
 
 const BIG_TS = [
   "import { foo } from './foo';",
@@ -276,5 +303,50 @@ describe('the budget is a cap, not a preference', () => {
       countTokens: async (text: string) => Math.ceil(text.length / 4),
     }));
     expect(outcome.text).toContain('compressor:');
+  });
+
+  // The ledger is the only record of what the tool did. Here the listing lost
+  // to the source and the cap trimmed the source, so no outline was produced
+  // and the reduction belongs to the budget, not to the symbol provider.
+  it('attributes a capped source fallback to the budget, not to the outline', async () => {
+    // selectOutput compares characters first, the budget counts tokens, and a
+    // real tokenizer does not hold those in proportion: JSON pays a token per
+    // quote and brace, a signature listing pays for long identifiers. Here the
+    // listing is the longer text and the source is the more expensive one, so
+    // the source is selected and then trimmed — no outline is produced.
+    const verbose = (i: number) => `(argument${i}: ${'Namespaced.Type.Argument'.repeat(60)})`;
+    const events = await withLedger(async () => {
+      await runOutlineTool({ path: 'package.json' }, deps(JSON_SRC, {
+        symbols: async () => Array.from({ length: 300 }, (_, i) => ({
+          name: `section.key${i}`, detail: verbose(i), kind: SymbolKind.Property,
+          column: 2, declLine: i + 2, start: i + 2, end: i + 2, children: [],
+        })),
+        countTokens: async (text: string) =>
+          (text.match(/["{}]/g)?.length ?? 0) + Math.ceil(text.length / 100),
+      }));
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.transforms).toEqual(['host-budget']);
+  });
+
+  it('attributes a listing that beat the source to the symbol provider', async () => {
+    const source = Array.from(
+      { length: 200 },
+      (_, i) => `  methodNumber${i}(): void {\n    doSomethingFairlyVerbose(${i});\n  }`,
+    ).join('\n');
+    const events = await withLedger(async () => {
+      await runOutlineTool({ path: 'src/service.ts' }, deps(source, {
+        symbols: async () => [{
+          name: 'Service', detail: '', kind: SymbolKind.Class,
+          column: 13, declLine: 1, start: 1, end: 600,
+          children: Array.from({ length: 200 }, (_, i) => ({
+            name: `methodNumber${i}`, detail: '(): void', kind: SymbolKind.Method,
+            column: 2, declLine: i * 3 + 1, start: i * 3 + 1, end: i * 3 + 3, children: [],
+          })),
+        }],
+      }));
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.transforms).toEqual(['symbol-outline']);
   });
 });

@@ -108,8 +108,9 @@ export async function runOutlineTool(
       // capping second matters when the outline loses: a JSON provider reports
       // a symbol per key, so the outline of a package.json is larger than the
       // file, and the source it falls back to is a whole file.
+      const selected = await selectOutput(numbered, candidate, budgeted);
       const content = await fitOutput(
-        await selectOutput(numbered, candidate, budgeted), budgeted,
+        selected, budgeted,
         `read a range with compressor_read ${input.path} offset=N limit=M`,
       ) || candidate;
       if (content !== numbered) {
@@ -117,7 +118,9 @@ export async function runOutlineTool(
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
           charsIn: numbered.length, charsOut: content.length,
           estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(content),
-          transforms: ['symbol-outline'],
+          // The listing lost to the source and the cap then cut it: what came
+          // back is trimmed source, not an outline.
+          transforms: [selected === numbered ? 'host-budget' : 'symbol-outline'],
         }).catch(() => {});
       }
       return { text: content, isError: false, outlined: content !== numbered };
