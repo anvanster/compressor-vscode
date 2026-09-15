@@ -188,11 +188,13 @@ items are judged by the file-scope `pub` rule.
 That last one has a known cost: a `pub` item in an `impl` on a file-private
 type is marked even though nothing outside the file can reach it, because one
 declaration line cannot say which type an `impl` is for.
-C and C++ **members** are not evaluated at all — only file-scope symbols are.
-Which `public:` section a member sits in depends on brace nesting, comments and
-the preprocessor, which no single line can settle, so a C or C++ class is
-marked by its own linkage while its members are listed without a verdict and
-the preamble drops its claim about unmarked names.
+A C or C++ member is read from the access section it sits in, found by walking
+outward to the enclosing type and skipping the line ranges of that type's other
+children — so a nested type's own `public:` does not govern the member after it.
+An access label counts only at the start of its line, so one written inside a
+comment is ignored; the cost is that an inline label in a one-line class
+(`class T { void a(); public: void b(); };`) is not read either, and `b` falls
+back to the class default and is under-marked.
 Languages without a rule are left unmarked entirely, and no preamble claims
 otherwise.
 

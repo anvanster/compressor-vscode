@@ -141,14 +141,23 @@
   from the TypeScript compiler over five of this extension's own files agree
   with their `export` lines exactly, and every file-scope verdict on a compiled
   C++ translation unit agrees with `nm`'s own internal/external linkage.
-  C and C++ **members** are deliberately not evaluated. Which `public:` section
-  a member belongs to depends on brace nesting, comments, string literals and
-  the preprocessor; every attempt to settle it from one declaration line marked
-  private members as public API, so a C or C++ class is marked by its own
-  linkage and its members are listed without a verdict.
-  A listing that contains symbols no rule judged says so: its preamble explains
+  A C or C++ member is read from the access section it sits in. The section is
+  found by walking outward to the enclosing type and stepping over the line
+  ranges of that type's other children, which the symbol provider already
+  reports — so a nested type's own `public:` governs its members and not the
+  member declared after it, and no brace counting is involved. An access label
+  counts only at the start of its line, which is what keeps one inside a
+  comment (`/// Not public: internal only.`) from deciding the member beneath
+  it; the cost is that an inline label in a one-line class is not read, and
+  those members fall back to the type's default and are under-marked.
+  `static` is recognised behind attributes, a template header and other
+  specifiers, so `inline static`, `[[nodiscard]] static` and `constexpr static`
+  are internal linkage rather than exported.
+  A listing that reaches symbols no rule judged says so: its preamble explains
   what `*` means and stops, instead of adding that unmarked names are internal
-  — a claim that only holds when every symbol was judged.
+  — a claim that only holds when every symbol was judged. An exported object
+  literal is the case that needs it, since a provider reports its properties as
+  children of a kind that declares nothing and no rule runs on them.
   Visibility is read from `selectionRange`, the name, rather than `range`:
   `range` covers "everything else, e.g. comments and code", so for a documented
   symbol it begins at the opening comment and a rule reading its first line
@@ -163,7 +172,7 @@
   that `compressorOutline` "Supports TS/JS, Python, Rust, and Go": that is the
   no-provider fallback's list, and stating it as the tool's own capability
   steered models away from outlining C++, Java and C# files that VS Code has a
-  symbol provider for. Steering revision is now v6; existing installs report as
+  symbol provider for. Steering revision is now v7; existing installs report as
   out of date until re-run.
 - Two error messages that sent callers away from the tools. A workspace root, or
   `.`, was reported as "outside the open workspace folder(s)" — the root was

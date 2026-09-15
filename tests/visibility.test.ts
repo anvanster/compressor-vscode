@@ -70,39 +70,149 @@ describe('C and C++ visibility', () => {
     ])).toEqual(['publicFn', 'gShared']);
   });
 
-  // Members are no longer evaluated: which access section a member sits in is a
-  // question about brace nesting, comments and the preprocessor, and answering
-  // it from one line marked private members as API in every shape tried. The
-  // file-scope type is still judged by its linkage.
-  it('marks a file-scope class but none of its members', () => {
+  // `static` does not have to be the first token. Each of these declares
+  // internal linkage and was marked externally visible while the check
+  // required `static` at the start of the line.
+  it('finds static behind attributes, templates and other specifiers', () => {
+    const cpp = [
+      'inline static int inlineFirst();',
+      '[[nodiscard]] static int attributed();',
+      'constexpr static int kConst = 5;',
+      '__attribute__((unused)) static void decorated();',
+      'void staticLooking();',
+      'inline int fastPath();',
+    ].join('\n');
+    expect(exported('a.cpp', cpp, [
+      ['inlineFirst', []], ['attributed', []], ['kConst', []],
+      ['decorated', []], ['staticLooking', []], ['fastPath', []],
+    ])).toEqual(['staticLooking', 'fastPath']);
+  });
+
+  it('honours the access sections of a class', () => {
+    const cpp = [
+      'class Widget {',
+      '  int privateByDefault_;',
+      'public:',
+      '  void render();',
+      'private:',
+      '  void layout();',
+      '};',
+      'struct Point {',
+      '  int x;',
+      '};',
+    ].join('\n');
+    expect(exported('w.hpp', cpp, [
+      ['Widget', ['privateByDefault_', 'render', 'layout']],
+      ['Point', ['x']],
+    ])).toEqual(['Widget', 'render', 'Point', 'x']);
+  });
+
+  // A nested type's own `public:` governs its members and nothing after it.
+  // Without stepping over the sibling's line range, `layout` read `Impl`'s
+  // section and shipped a private member as API. The ranges are spelled out
+  // here because they are what the mechanism turns on: a provider reports a
+  // nested type spanning its whole body, which the shorthand above cannot say.
+  it('does not let a nested type section govern the member after it', () => {
     const cpp = [
       'class Widget {',
       'public:',
       '  void render();',
       'private:',
-      '  class Guard { public: ~Guard(); };',
-      '  struct Impl;',
-      '  Impl* impl_;',
-      '  int count_;',
+      '  struct Impl {',
+      '  public:',
+      '    int x;',
+      '  };',
+      '  void layout();',
       '};',
-      'static class Hidden { public: void go(); } hidden;',
-    ].join('\n');
-    expect(exported('w.hpp', cpp, [
-      ['Widget', ['render', ['Guard', SymbolKind.Class], ['Impl', SymbolKind.Struct], 'impl_', 'count_']],
-    ])).toEqual(['Widget']);
-    expect(exported('w.hpp', cpp, [['Hidden', [], SymbolKind.Class]])).toEqual([]);
+    ];
+    const at = (name: string, kind: SymbolKind, declLine: number, end: number): CodeSymbol => ({
+      name, detail: '', kind, declLine, start: declLine, end,
+      column: cpp[declLine - 1]!.indexOf(name), children: [],
+    });
+    const impl = at('Impl', SymbolKind.Struct, 5, 8);
+    impl.children = [at('x', SymbolKind.Field, 7, 7)];
+    const widget: CodeSymbol = {
+      name: 'Widget', detail: '', kind: SymbolKind.Class,
+      declLine: 1, start: 1, end: 10, column: 6,
+      children: [at('render', SymbolKind.Method, 3, 3), impl, at('layout', SymbolKind.Method, 9, 9)],
+    };
+    const marked = formatSymbols([widget], { path: 'w.hpp', lines: cpp }).text
+      .split('\n').filter((line) => line.startsWith('*'));
+
+    expect(marked.some((line) => line.startsWith('*Widget.render'))).toBe(true);
+    expect(marked.some((line) => line.startsWith('*Widget.layout'))).toBe(false);
+    // `Impl` sits in the private section, so it and everything under it are
+    // unmarked — its own `public:` governs its members, not the class's.
+    expect(marked.some((line) => line.startsWith('*Widget.Impl'))).toBe(false);
   });
 
-  // Nothing about an unmarked name follows when members went unjudged, so the
-  // legend has to stop short of claiming they are internal.
-  it('leaves the unmarked-names claim out of a listing it could not finish', () => {
+  it('does not mark a private pimpl pointer or its forward declaration', () => {
+    const cpp = [
+      'class Widget {',
+      'public:',
+      '  void run();',
+      'private:',
+      '  struct Impl;',
+      '  Impl* impl_;',
+      '};',
+    ].join('\n');
+    expect(exported('w.hpp', cpp, [
+      ['Widget', ['run', ['Impl', SymbolKind.Struct], 'impl_']],
+    ])).toEqual(['Widget', 'run']);
+  });
+
+  // An access label is read only at the start of its line, so one inside a
+  // comment cannot govern the member beneath it.
+  it('ignores an access label written inside a comment', () => {
+    const cpp = [
+      'class Widget {',
+      'private:',
+      '  /// Not public: internal only.',
+      '  void layoutPass();',
+      '};',
+    ].join('\n');
+    expect(exported('w.hpp', cpp, [['Widget', ['layoutPass']]])).toEqual(['Widget']);
+  });
+
+  // The cost of anchoring: an inline label mid-line is not a section opener the
+  // scan can see, so `shown` falls back to the class default and is
+  // under-marked. Under-marking is the safe direction — the caller reads the
+  // code rather than trusting a wrong summary.
+  it('under-marks a one-line class rather than reading an inline label', () => {
+    const cpp = ['class Tight { void hidden(); public: void shown(); };'].join('\n');
+    expect(exported('t.hpp', cpp, [['Tight', ['hidden', 'shown']]])).toEqual(['Tight']);
+  });
+
+  it('does not mistake a static member for internal linkage', () => {
+    const cpp = ['class Counter {', 'public:', '  static int total();', '};'].join('\n');
+    expect(exported('c.cpp', cpp, [['Counter', ['total']]])).toEqual(['Counter', 'total']);
+  });
+
+  // An enum constant sits in no access section of its own, so it follows its
+  // enum the way every other curly-brace language treats one — and because it
+  // is judged, it does not cost the listing its completeness claim.
+  it('marks the constants of a visible C++ enum and stays complete', () => {
+    const cpp = ['enum class Level {', '  Debug,', '  Info', '};'].join('\n');
+    const spec = [[
+      'Level',
+      [['Debug', SymbolKind.EnumMember], ['Info', SymbolKind.EnumMember]],
+      SymbolKind.Enum,
+    ]] as const;
+    expect(exported('l.hpp', cpp, spec)).toEqual(['Level', 'Debug', 'Info']);
+    const listing = formatSymbols(symbolsFor(cpp, spec), { path: 'l.hpp', lines: cpp.split('\n') });
+    expect(listing.complete).toBe(true);
+    expect(exportLegend(listing)).toContain('do not list them as its API');
+  });
+
+  // Every symbol here was judged, so the legend can say what an unmarked name
+  // means as well as what a mark means.
+  it('keeps the unmarked-names claim for a C++ header it judged throughout', () => {
     const cpp = ['class Widget {', 'private:', '  void layout();', '};'].join('\n');
     const listing = formatSymbols(symbolsFor(cpp, [['Widget', ['layout']]]), {
       path: 'w.hpp', lines: cpp.split('\n'),
     });
-    expect(listing.complete).toBe(false);
-    expect(exportLegend(listing)).toContain('visible outside this file');
-    expect(exportLegend(listing)).not.toContain('do not list them as its API');
+    expect(listing.complete).toBe(true);
+    expect(exportLegend(listing)).toContain('do not list them as its API');
   });
 
   it('hides an anonymous namespace and keeps a named one', () => {
@@ -468,6 +578,38 @@ describe('inherited visibility', () => {
       '}',
     ].join('\n');
     expect(exported('a.cpp', cpp, [['namespace', ['Hidden']]])).toEqual([]);
+  });
+});
+
+// A provider reports an exported object literal as a Variable whose properties
+// are children. No rule runs on them, so they are listed unmarked — but
+// `api.fetchUser` is reachable, and the legend must not call it internal.
+describe('coverage the legend depends on', () => {
+  const api = [
+    'export const api = {',
+    '  fetchUser(id: string) { return id; },',
+    '  saveUser(user: User) { return user; },',
+    '};',
+  ].join('\n');
+
+  it('does not claim unmarked object-literal properties are internal', () => {
+    const listing = formatSymbols(
+      symbolsFor(api, [['api', ['fetchUser', 'saveUser'], SymbolKind.Variable]]),
+      { path: 'src/api.ts', lines: api.split('\n') },
+    );
+    expect(listing.text).toMatch(/^\*api /m);
+    expect(listing.complete).toBe(false);
+    expect(exportLegend(listing)).toContain('visible outside this file');
+    expect(exportLegend(listing)).not.toContain('do not list them as its API');
+  });
+
+  it('keeps the claim for a file whose symbols a rule all reached', () => {
+    const ts = ['export function open() {}', 'function shut() {}'].join('\n');
+    const listing = formatSymbols(symbolsFor(ts, [['open', []], ['shut', []]]), {
+      path: 'src/api.ts', lines: ts.split('\n'),
+    });
+    expect(listing.complete).toBe(true);
+    expect(exportLegend(listing)).toContain('do not list them as its API');
   });
 });
 

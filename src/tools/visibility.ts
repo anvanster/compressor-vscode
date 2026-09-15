@@ -19,13 +19,20 @@ import * as vscode from 'vscode';
  * Under-marking is the safe direction: the caller reads unmarked code rather
  * than trusting a wrong summary.
  *
- * C and C++ members are not evaluated at all. The `public:` section a member
- * belongs to is a question about brace nesting, comments, string literals and
- * the preprocessor, and answering it from one line marked private members as
- * public API in every shape it was tried on. A listing that contains
- * unevaluated symbols says so, so the legend can stop claiming an unmarked
- * name is internal.
+ * An inline C++ access label (`class T { void a(); public: void b(); };`) is
+ * not read, because a label is only recognised at the start of its line —
+ * which is what keeps one inside a comment from governing the member below it.
+ * `b` there falls back to the class default and is under-marked.
+ *
+ * A listing that reaches symbols no rule judged says so, so the legend can
+ * stop claiming an unmarked name is internal.
  */
+
+/** A 1-based, inclusive line range. */
+export interface LineRange {
+  start: number;
+  end: number;
+}
 
 /** One symbol, with the context its visibility rule needs. */
 export interface VisibilityContext {
@@ -41,6 +48,12 @@ export interface VisibilityContext {
   column: number;
   /** Every line of the file. */
   lines: readonly string[];
+  /**
+   * Line ranges of the declarations sharing this symbol's container, this one
+   * included. A scan walking outward from a symbol steps over them: whatever a
+   * sibling's own body says governs that sibling, not this symbol.
+   */
+  siblings: readonly LineRange[];
 }
 
 /**
@@ -77,13 +90,7 @@ export type MemberScope =
    * A grouping rather than a scope: the container is not itself a symbol and is
    * never marked, and its children are judged at file scope.
    */
-  | 'group'
-  /**
-   * No rule can answer for these members, so none is applied: they are listed
-   * without a mark, and the listing reports itself as incomplete so the legend
-   * does not claim an unmarked name is internal.
-   */
-  | 'unevaluated';
+  | 'group';
 
 export interface LanguageRule {
   visible: (context: VisibilityContext) => boolean;
@@ -170,22 +177,81 @@ const anonymousNamespace = (line: string): boolean =>
   /^\s*namespace\s*\{/.test(line) || /^\s*namespace\s*$/.test(line.trimEnd());
 
 /**
+ * An access label, anchored. A label only ever opens a section at the start of
+ * its line, so anchoring is what keeps `/// Not public: internal only.` and
+ * `// NOTE: private: section below` from deciding the member beneath them —
+ * no comment stripping needed. The cost is an inline label in a one-line class
+ * (`class T { void a(); public: void b(); };`), which no longer resolves: `b`
+ * falls back to the class default and is under-marked, the safe direction.
+ */
+const ACCESS_LABEL = /^\s*(public|private|protected)\s*:(?![:\w])/;
+const TYPE_OPENER = /^\s*(?:template\s*<[^>]*>\s*)?(class|struct|union)\b/;
+
+/** Leading attributes and template headers, which sit before any specifier. */
+const DECORATION = /^\s*(?:\[\[[^\]]*\]\]|__attribute__\s*\(\(.*?\)\)|template\s*<[^>]*>)/;
+
+const SPECIFIERS: ReadonlySet<string> = new Set([
+  'static', 'inline', 'constexpr', 'consteval', 'constinit', 'extern', 'virtual',
+  'explicit', 'friend', 'mutable', 'thread_local', 'const', 'volatile', 'typedef',
+]);
+
+/**
+ * `static` at file scope means internal linkage, but it does not have to come
+ * first: `inline static`, `[[nodiscard]] static` and `constexpr static` all
+ * hide a symbol. Read the run of leading specifier keywords after any
+ * attributes or template header and stop at the first word that is not one, so
+ * `static_assert(...)` and `void staticLooking();` stay external.
+ */
+const internalLinkage = (decl: string): boolean => {
+  let rest = decl;
+  for (let decoration = DECORATION.exec(rest); decoration !== null; decoration = DECORATION.exec(rest)) {
+    rest = rest.slice(decoration[0].length);
+  }
+  for (const word of rest.trim().split(/\s+/)) {
+    const token = /^[A-Za-z_][A-Za-z0-9_]*/.exec(word)?.[0];
+    if (token === undefined || !SPECIFIERS.has(token)) return false;
+    if (token === 'static') return true;
+  }
+  return false;
+};
+
+const covers = (range: LineRange, line: number): boolean =>
+  line >= range.start && line <= range.end;
+
+/**
  * C and C++ have no `export` keyword outside C++20 modules, so the rule runs
- * the other way round: a file-scope symbol is visible unless `static` gives it
- * internal linkage or an anonymous namespace encloses it.
+ * the other way round: a symbol is visible unless something hides it. At file
+ * scope that is `static` or an anonymous namespace; inside a class it is the
+ * access section the member sits in.
  *
- * Members are a different question, and one line cannot answer it. Which
- * `public:` / `private:` section a member sits in depends on brace nesting,
- * comments, string literals and the preprocessor — a C++ lexer, which this
- * module is deliberately not. Three rounds of approximating it each marked
- * private members as API, so members are left unevaluated instead.
+ * The section is found by walking outward to the container, stepping over the
+ * line ranges of the container's other children. That is what keeps a nested
+ * type's own `public:` from governing the member declared after it, and it
+ * needs no brace counting: the provider already reports where each sibling
+ * begins and ends.
  */
 const cFamily: Rule = (context) => {
-  const { decl, lines, start } = context;
+  const { decl, lines, start, containerStart, column, siblings } = context;
   if (anonymousNamespace(decl)) return false;
-  const previous = lines[start - 2] ?? '';
-  // A declaration may put `static` alone on the line above its name.
-  return !/^\s*static\b/.test(decl) && !/^\s*static\s*$/.test(previous.trimEnd());
+  if (topLevel(context)) {
+    const previous = lines[start - 2] ?? '';
+    // A declaration may put `static` alone on the line above its name.
+    return !internalLinkage(decl) && !/^\s*static\s*$/.test(previous.trimEnd());
+  }
+  for (let index = start; index >= containerStart; index -= 1) {
+    const sibling = index !== start
+      && siblings.some((range) => covers(range, index) && !covers(range, start));
+    if (sibling) continue;
+    const text = index === start ? (lines[index - 1] ?? '').slice(0, column) : (lines[index - 1] ?? '');
+    const label = ACCESS_LABEL.exec(text);
+    if (label) return label[1] === 'public';
+    const open = TYPE_OPENER.exec(text);
+    // `class` defaults to private, `struct` and `union` to public. An opener
+    // with nothing but whitespace between it and the name is this symbol's own
+    // declaration rather than the scope it sits in, so keep looking outward.
+    if (open && text.slice(open[0].length).trim() !== '') return open[1] !== 'class';
+  }
+  return true;
 };
 
 const RULES: Record<string, LanguageRule> = {
@@ -229,14 +295,11 @@ const RULES: Record<string, LanguageRule> = {
     visible: cFamily,
     // A named namespace re-opens file scope, where the linkage rule applies. An
     // anonymous one is a boundary rather than a grouping: cFamily refuses it,
-    // and refusing the container hides everything under it. Everything else
-    // that holds members — a class, struct, union or enum — holds members this
-    // module cannot judge.
-    scope: (container) => {
-      if (anonymousNamespace(container.decl)) return 'unevaluated';
-      const scope = withNamespaces('group')(container);
-      return scope === undefined || scope === 'group' ? scope : 'unevaluated';
-    },
+    // and refusing the container hides everything under it. An enum constant
+    // sits in no access section of its own, so it follows its enum.
+    scope: (container) => anonymousNamespace(container.decl)
+      ? 'member'
+      : withNamespaces('group')(container),
   },
 };
 

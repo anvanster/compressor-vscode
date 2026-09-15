@@ -100,8 +100,9 @@ export interface SymbolListing {
  * legend for a mark that does not appear.
  *
  * What an unmarked name means is a second claim, and only a listing every rule
- * reached can support it. A C++ header lists members no rule judged, so there
- * the legend says what `*` means and stops.
+ * reached can support it. An exported object literal's properties are reported
+ * as children of a kind that declares nothing, so no rule runs on them and the
+ * legend there says what `*` means and stops.
  */
 export function exportLegend(listing: SymbolListing): string {
   if (!/^\*/m.test(listing.text)) return '';
@@ -138,50 +139,56 @@ export function formatSymbols(symbols: readonly CodeSymbol[], source?: SymbolSou
   const walk = (
     nodes: readonly CodeSymbol[], parent: string, containerStart: number,
     implicitFrom?: vscode.SymbolKind,
-  ): string[] => nodes.flatMap((symbol) => {
-    const name = parent ? `${parent}.${symbol.name}` : symbol.name;
-    const line = source.lines[symbol.declLine - 1];
-    if (line === undefined) {
-      complete = false;
-      return [entry(symbol, name, false), ...listed(symbol.children, name)];
-    }
-    // The whole line: a keyword like `export` or `static` sits to the left of
-    // the name, so slicing at the name's column would discard it.
-    const decl = line.trim();
-    const container = { kind: symbol.kind, decl };
-    const scope = rule.scope(container);
-    if (scope === 'group') {
-      return [entry(symbol, name, false), ...walk(symbol.children, name, 0)];
-    }
-    const context = {
-      name: symbol.name,
-      decl,
-      start: symbol.declLine,
-      containerStart,
-      column: symbol.column,
-      lines: source.lines,
-    };
-    // An enum grants its constants default visibility and nothing else: its
-    // fields, constructors and methods are ordinary class members.
-    const implicit = implicitFrom !== undefined
-      && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
-    const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
-    // an invisible container hides everything under it — a verdict of its own
-    if (!ok) return [entry(symbol, name, false), ...listed(symbol.children, name)];
-    // `undefined` is not a container: what it declares are locals, which no
-    // rule needs to reach. `unevaluated` is a container whose members no rule
-    // can judge, which the listing has to own up to.
-    if (scope === 'unevaluated' && symbol.children.length > 0) complete = false;
-    return [
-      entry(symbol, name, true),
-      ...(scope === undefined || scope === 'unevaluated'
-        ? listed(symbol.children, name)
-        : walk(
-          symbol.children, name, scope === 'file' ? 0 : symbol.declLine,
-          scope === 'implicit' ? symbol.kind : undefined,
-        )),
-    ];
-  });
+  ): string[] => {
+    const siblings = nodes.map((node) => ({ start: node.start, end: node.end }));
+    return nodes.flatMap((symbol) => {
+      const name = parent ? `${parent}.${symbol.name}` : symbol.name;
+      const line = source.lines[symbol.declLine - 1];
+      if (line === undefined) {
+        complete = false;
+        return [entry(symbol, name, false), ...listed(symbol.children, name)];
+      }
+      // The whole line: a keyword like `export` or `static` sits to the left of
+      // the name, so slicing at the name's column would discard it.
+      const decl = line.trim();
+      const container = { kind: symbol.kind, decl };
+      const scope = rule.scope(container);
+      if (scope === 'group') {
+        return [entry(symbol, name, false), ...walk(symbol.children, name, 0)];
+      }
+      const context = {
+        name: symbol.name,
+        decl,
+        start: symbol.declLine,
+        containerStart,
+        column: symbol.column,
+        lines: source.lines,
+        siblings,
+      };
+      // An enum grants its constants default visibility and nothing else: its
+      // fields, constructors and methods are ordinary class members.
+      const implicit = implicitFrom !== undefined
+        && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
+      const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
+      // an invisible container hides everything under it — a verdict of its own
+      if (!ok) return [entry(symbol, name, false), ...listed(symbol.children, name)];
+      // Children of a kind that declares nothing are emitted with no rule run on
+      // them. Usually they are locals, where unmarked really does mean internal,
+      // but a provider also reports an exported object literal's properties this
+      // way, and `api.fetchUser` is reachable. The flag follows whether a rule
+      // ran, not what the container looked like.
+      if (scope === undefined && symbol.children.length > 0) complete = false;
+      return [
+        entry(symbol, name, true),
+        ...(scope === undefined
+          ? listed(symbol.children, name)
+          : walk(
+            symbol.children, name, scope === 'file' ? 0 : symbol.declLine,
+            scope === 'implicit' ? symbol.kind : undefined,
+          )),
+      ];
+    });
+  };
 
   const text = walk(symbols, '', 0).join('\n');
   return { text, complete };

@@ -147,11 +147,9 @@ describe('outline honesty', () => {
     expect(outcome.text).toContain('Service.run0');
   });
 
-  // End to end: a C++ header marks the file-scope class, marks none of its
-  // members, and the preamble stops at what `*` means — the members were never
-  // judged, so "unmarked names are internal" would be a claim about symbols no
-  // rule looked at.
-  it('outlines a C++ header without claiming its unmarked members are internal', async () => {
+  // End to end: a C++ header marks its public members and not its private ones,
+  // and because every symbol was judged the preamble keeps its second sentence.
+  it('outlines a C++ header by access section, keeping the full legend', async () => {
     // inline bodies, so the listing genuinely beats the source and the outline
     // is what comes back rather than the header itself
     const COUNT = 40;
@@ -163,22 +161,30 @@ describe('outline honesty', () => {
         `    doSomethingFairlyVerbose(${i});`,
         '  }',
       ]).flat(),
+      'private:',
+      '  void hiddenHelper() {',
+      '    doSomethingFairlyVerbose(-1);',
+      '  }',
       '};',
     ].join('\n');
+    const member = (name: string, declLine: number): CodeSymbol => ({
+      name, detail: '()', kind: SymbolKind.Method,
+      column: 7, declLine, start: declLine, end: declLine + 2, children: [],
+    });
     const outcome = await runOutlineTool({ path: 'src/widget.hpp' }, deps(header, {
       symbols: async () => [{
         name: 'Widget', detail: '', kind: SymbolKind.Class,
-        column: 6, declLine: 1, start: 1, end: COUNT * 3 + 3,
-        children: Array.from({ length: COUNT }, (_, i): CodeSymbol => ({
-          name: `member${i}`, detail: '()', kind: SymbolKind.Method,
-          column: 7, declLine: i * 3 + 3, start: i * 3 + 3, end: i * 3 + 5, children: [],
-        })),
+        column: 6, declLine: 1, start: 1, end: COUNT * 3 + 7,
+        children: [
+          ...Array.from({ length: COUNT }, (_, i) => member(`member${i}`, i * 3 + 3)),
+          member('hiddenHelper', COUNT * 3 + 4),
+        ],
       }],
     }));
     expect(outcome.text).toContain('*Widget ');
-    expect(outcome.text).not.toMatch(/^\*Widget\./m);
-    expect(outcome.text).toContain('visible outside this file');
-    expect(outcome.text).not.toContain('do not list them as its API');
+    expect(outcome.text).toMatch(/^\*Widget\.member0 /m);
+    expect(outcome.text).toMatch(/^Widget\.hiddenHelper /m);
+    expect(outcome.text).toContain('do not list them as its API');
   });
 
   it('keeps the unmarked-names claim for a listing it judged throughout', async () => {
