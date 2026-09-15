@@ -1,3 +1,5 @@
+import * as vscode from 'vscode';
+
 /**
  * An outline lists every symbol the language provider reports, with nothing to
  * say which ones are reachable from outside the file. Models read that as a
@@ -31,9 +33,79 @@ export interface VisibilityContext {
   lines: readonly string[];
 }
 
-type Rule = (context: VisibilityContext) => boolean;
+/**
+ * A container symbol, as its language sees it.
+ *
+ * What sits under a container is not one thing. A class member is governed by
+ * an access keyword; an interface method has none to give; a namespace member
+ * carries the same keyword it would at file scope; and a Rust `impl` block is
+ * not a scope at all. A rule that reads only the child's own line cannot tell
+ * these apart, and gets a wrong answer in both directions: an interface method
+ * looks package-private to the Java rule, and a namespace member looks public
+ * to the TypeScript one.
+ */
+export interface ContainerContext {
+  kind: vscode.SymbolKind;
+  /** The container's declaration line, trimmed. */
+  decl: string;
+}
+
+/** How the declarations inside a container are judged. */
+export type MemberScope =
+  /** By the language's access rules for members. */
+  | 'member'
+  /** By the file-scope rule: the member carries its own keyword. */
+  | 'file'
+  /** No access keyword exists here, so a member is visible with its container. */
+  | 'implicit'
+  /**
+   * A grouping rather than a scope: the container is not itself a symbol and is
+   * never marked, its children are judged at file scope, and it is reachable
+   * only as far as the symbol it names is.
+   */
+  | 'group';
+
+export interface LanguageRule {
+  visible: (context: VisibilityContext) => boolean;
+  /** undefined for a kind that declares nothing: its children are locals. */
+  scope: (container: ContainerContext) => MemberScope | undefined;
+}
+
+type Rule = LanguageRule['visible'];
 
 const topLevel = (context: VisibilityContext): boolean => context.containerStart === 0;
+
+const KIND = vscode.SymbolKind;
+
+/**
+ * Kinds that hold declarations. A provider reports a function's nested
+ * functions and function-valued consts as its children, and those are locals:
+ * nothing outside the function can name them whatever their declaration line
+ * says. `export function f() { const g = () => {}; }` is one symbol of public
+ * API, not two.
+ */
+const DECLARING: ReadonlySet<vscode.SymbolKind> = new Set([
+  KIND.Class, KIND.Interface, KIND.Struct, KIND.Enum,
+  KIND.Object, KIND.Namespace, KIND.Module,
+]);
+
+/** Every container is its own access scope; nothing declares members but these. */
+const byKind = (container: ContainerContext): MemberScope | undefined =>
+  DECLARING.has(container.kind) ? 'member' : undefined;
+
+/**
+ * The shape shared by the curly-brace languages: an interface or an enum has
+ * no access keywords to read, and a namespace re-opens whatever scope the
+ * language spells out — `file` where a member must repeat the keyword,
+ * `group` where the namespace itself never carries one.
+ */
+const withNamespaces = (namespaces: MemberScope) =>
+  (container: ContainerContext): MemberScope | undefined => {
+    if (!DECLARING.has(container.kind)) return undefined;
+    if (container.kind === KIND.Namespace || container.kind === KIND.Module) return namespaces;
+    if (container.kind === KIND.Interface || container.kind === KIND.Enum) return 'implicit';
+    return 'member';
+  };
 
 /**
  * The untrimmed declaration line up to the name's column: every modifier sits
@@ -93,28 +165,52 @@ const cFamily: Rule = (context) => {
   return true;
 };
 
-const RULES: Record<string, Rule> = {
+const RULES: Record<string, LanguageRule> = {
   // `export` only ever appears at file scope; members are public unless the
-  // declaration says otherwise, including the `#private` field syntax.
-  ts: (context) => topLevel(context)
-    ? /^export\b/.test(context.decl)
-    : !/^[\s]*(?:(?:static|readonly|async|abstract|override|accessor)\s+)*(?:private|protected)\b/.test(context.decl)
-      && !context.name.startsWith('#'),
+  // declaration says otherwise, including the `#private` field syntax. A
+  // namespace member repeats `export`, so it is judged at file scope.
+  ts: {
+    visible: (context) => topLevel(context)
+      ? /^export\b/.test(context.decl)
+      : !/^[\s]*(?:(?:static|readonly|async|abstract|override|accessor)\s+)*(?:private|protected)\b/.test(context.decl)
+        && !context.name.startsWith('#'),
+    scope: withNamespaces('file'),
+  },
   // `pub`, including `pub(crate)`: both reach another file, which is what the
-  // mark claims. Works unchanged on struct fields and `impl` items.
-  rs: (context) => /^pub\b/.test(context.decl),
-  // Exported identifiers are capitalised, at every depth including fields.
-  go: (context) => /^[A-Z]/.test(context.name),
+  // mark claims. An `impl` block carries no `pub` of its own and is not a
+  // symbol anyone can name, so it groups rather than encloses.
+  rs: {
+    visible: (context) => /^pub\b/.test(context.decl),
+    scope: (container) => /^impl\b/.test(container.decl) ? 'group' : withNamespaces('file')(container),
+  },
+  // Exported identifiers are capitalised, at every depth including fields. An
+  // interface method follows the same rule, so nothing here is implicit.
+  go: { visible: (context) => /^[A-Z]/.test(context.name), scope: byKind },
   // The leading-underscore convention, which applies to members too.
-  py: (context) => !context.name.startsWith('_'),
-  // Java package-private and C# internal are both the unmarked default.
-  java: (context) => /^(?:[\w@[\]]+\s+)*?public\b/.test(context.decl),
+  py: { visible: (context) => !context.name.startsWith('_'), scope: byKind },
+  // Java package-private and C# internal are both the unmarked default. A C#
+  // namespace never carries an access keyword, so it groups rather than
+  // encloses; treating it as a scope hid every type in the file behind it.
+  java: {
+    visible: (context) => /^(?:[\w@[\]]+\s+)*?public\b/.test(context.decl),
+    scope: withNamespaces('group'),
+  },
   // Kotlin, Scala and Groovy default to public, so the test runs the other way
   // round from Java's: visible unless the declaration hides it. Kotlin's
   // `internal` does reach the rest of its module, but not the consumers this
   // mark is about, so it joins `private` and `protected` on the hidden side.
-  open: (context) => !/\b(?:private|protected|internal)\b/.test(beforeName(context)),
-  c: cFamily,
+  open: {
+    visible: (context) => !/\b(?:private|protected|internal)\b/.test(beforeName(context)),
+    scope: byKind,
+  },
+  c: {
+    visible: cFamily,
+    // An anonymous namespace is a boundary, not a grouping: its contents have
+    // internal linkage, and cFamily already refuses it and everything under it.
+    scope: (container) => anonymousNamespace(container.decl)
+      ? 'member'
+      : withNamespaces('group')(container),
+  },
 };
 
 const BY_EXTENSION: Record<string, keyof typeof RULES> = {
@@ -133,7 +229,7 @@ const BY_EXTENSION: Record<string, keyof typeof RULES> = {
  * The rule for a path, or undefined when the language is not one of the above.
  * Callers mark nothing rather than guessing when this returns undefined.
  */
-export function visibilityRule(filePath: string): Rule | undefined {
+export function visibilityRule(filePath: string): LanguageRule | undefined {
   const extension = filePath.toLowerCase().split('.').pop();
   const key = extension === undefined ? undefined : BY_EXTENSION[extension];
   return key === undefined ? undefined : RULES[key];

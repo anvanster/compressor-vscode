@@ -158,7 +158,7 @@
   that `compressorOutline` "Supports TS/JS, Python, Rust, and Go": that is the
   no-provider fallback's list, and stating it as the tool's own capability
   steered models away from outlining C++, Java and C# files that VS Code has a
-  symbol provider for. Steering revision is now v4; existing installs report as
+  symbol provider for. Steering revision is now v5; existing installs report as
   out of date until re-run.
 - Two error messages that sent callers away from the tools. A workspace root, or
   `.`, was reported as "outside the open workspace folder(s)" — the root was
@@ -167,8 +167,10 @@
   Observed together: a model outlined the workspace root, concluded from the
   message that the extension could not see the project, and described the
   repository from filenames rather than calling the tools again. A root now
-  resolves, and a directory says it is a directory and names `compressor_search`
-  (`output=files`) as the way to list one.
+  resolves, and a directory says it is a directory and points at the files
+  inside it. `#compressorSearch` has no listing mode — it requires a query and
+  reports only the files that match one — so the message names a text search
+  scoped with `include=<dir>/**` rather than claiming a directory can be listed.
 - `COMPRESSOR_NO_LEDGER=1` stops the extension recording anything. The switch is
   read from the extension host's own environment, so it has to be set for the
   VS Code process itself; exporting it in an integrated terminal does not reach

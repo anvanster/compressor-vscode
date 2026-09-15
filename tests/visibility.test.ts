@@ -44,7 +44,8 @@ function exported(path: string, source: string, spec: readonly Spec[]): string[]
   return formatSymbols(symbolsFor(source, spec), { path, lines })
     .split('\n')
     .filter((line) => line.startsWith('*'))
-    .map((line) => line.slice(1).split(' ')[0]!.split('.').pop()!);
+    // a provider name can contain a space (`impl Foo`), so cut at the range
+    .map((line) => line.slice(1).split(' [lines ')[0]!.split('.').pop()!);
 }
 
 describe('C and C++ visibility', () => {
@@ -173,6 +174,80 @@ describe('other languages', () => {
   it('marks a Groovy file', () => {
     const groovy = ['class Box {', '    def open() {}', '    private def latch() {}', '}'].join('\n');
     expect(exported('Box.groovy', groovy, [['Box', ['open', 'latch']]])).toEqual(['Box', 'open']);
+  });
+});
+
+// A container's children are not one thing, and a rule that reads only the
+// child's own declaration line gets them wrong in both directions.
+describe('what a container does to the symbols inside it', () => {
+  // rust-analyzer reports an `impl` block as a container whose declaration
+  // line is `impl Foo {`. That line has no `pub`, so the walk stopped there
+  // and every `pub fn` in every Rust file shipped unmarked, beneath a legend
+  // saying unmarked names are internal.
+  it('descends through a Rust impl block without marking the block', () => {
+    const rs = ['pub struct Foo;', 'impl Foo {', '    pub fn new() -> Self { Foo }', '}'].join('\n');
+    expect(exported('a.rs', rs, [
+      ['Foo', [], SymbolKind.Struct],
+      ['impl Foo', ['new'], SymbolKind.Object],
+    ])).toEqual(['Foo', 'new']);
+  });
+
+  it('does not mark the impl of a struct the file keeps to itself', () => {
+    const rs = ['struct Hidden;', 'impl Hidden {', '    pub fn new() -> Self { Hidden }', '}'].join('\n');
+    expect(exported('a.rs', rs, [
+      ['Hidden', [], SymbolKind.Struct],
+      ['impl Hidden', ['new'], SymbolKind.Object],
+    ])).toEqual([]);
+  });
+
+  it('marks a Rust trait method, which carries no pub of its own', () => {
+    const rs = ['pub trait Greet {', '    fn hello(&self);', '}'].join('\n');
+    expect(exported('a.rs', rs, [['Greet', ['hello'], SymbolKind.Interface]]))
+      .toEqual(['Greet', 'hello']);
+  });
+
+  it('marks a Java interface method, which never says public', () => {
+    const java = ['public interface Repo {', '    List<Item> findAll();', '}'].join('\n');
+    expect(exported('Repo.java', java, [['Repo', ['findAll'], SymbolKind.Interface]]))
+      .toEqual(['Repo', 'findAll']);
+  });
+
+  it('marks Java enum constants', () => {
+    const java = ['public enum Color {', '    RED,', '    GREEN', '}'].join('\n');
+    expect(exported('Color.java', java, [['Color', ['RED', 'GREEN'], SymbolKind.Enum]]))
+      .toEqual(['Color', 'RED', 'GREEN']);
+  });
+
+  it('marks a C# interface member', () => {
+    const cs = ['public interface IRepo', '{', '    int Count { get; }', '}'].join('\n');
+    expect(exported('IRepo.cs', cs, [['IRepo', ['Count'], SymbolKind.Interface]]))
+      .toEqual(['IRepo', 'Count']);
+  });
+
+  // A C# namespace never carries an access keyword, so judging it by the same
+  // rule as a class left it unmarked and hid every type in the file with it.
+  it('sees through a C# namespace to the types inside it', () => {
+    const cs = ['namespace Data', '{', '    public class Repo { }', '}'].join('\n');
+    expect(exported('Repo.cs', cs, [['Data', ['Repo'], SymbolKind.Namespace]])).toEqual(['Repo']);
+  });
+
+  // The other direction: a TypeScript namespace member repeats `export`, so
+  // the member rule's "public unless it says private" marked module-local
+  // constants as part of the file's surface.
+  it('judges a TypeScript namespace member at file scope', () => {
+    const ts = [
+      'export namespace Cfg {',
+      "  const SECRET = 'x';",
+      '  export function get() {}',
+      '}',
+    ].join('\n');
+    expect(exported('a.ts', ts, [['Cfg', ['SECRET', 'get'], SymbolKind.Module]]))
+      .toEqual(['Cfg', 'get']);
+  });
+
+  it('marks nothing inside a TypeScript namespace the file never exports', () => {
+    const ts = ['namespace Internal {', '  export function f() {}', '}'].join('\n');
+    expect(exported('a.ts', ts, [['Internal', ['f'], SymbolKind.Module]])).toEqual([]);
   });
 });
 

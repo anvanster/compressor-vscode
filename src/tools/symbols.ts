@@ -71,6 +71,9 @@ export interface SymbolSource {
   lines: readonly string[];
 }
 
+const LEGEND =
+  '* = visible outside this file or its class; unmarked names are internal to it, so do not list them as its API. ';
+
 /**
  * One sentence for the preamble explaining the `*` in formatted output, or ''
  * when that output carries no mark. Stating what the mark means is the point:
@@ -85,28 +88,19 @@ export interface SymbolSource {
  * legend for a mark that does not appear.
  */
 export function exportLegend(formatted: string): string {
-  return /^\*/m.test(formatted)
-    ? '* = visible outside this file or its class; unmarked names are internal to it, so do not list them as its API. '
-    : '';
+  return /^\*/m.test(formatted) ? LEGEND : '';
 }
 
 /**
- * Kinds that declare members. A provider reports a function's nested functions
- * and function-valued consts as its children, and those are locals: nothing
- * outside the function can name them whatever their declaration line says, so
- * every rule's member branch would over-mark them. `export function f() { const
- * g = () => {}; }` is one symbol of public API, not two.
+ * The legend is spliced into a preamble before the budget cap runs, so a file
+ * whose marked declarations all sit below the cut ships the sentence with
+ * nothing for it to explain — and "unmarked names are internal" then reads as
+ * "this file exports nothing". Drop it from whatever text is actually
+ * returned, which only ever shortens it.
  */
-const MEMBER_CONTAINERS: ReadonlySet<vscode.SymbolKind> = new Set([
-  vscode.SymbolKind.Class,
-  vscode.SymbolKind.Interface,
-  vscode.SymbolKind.Struct,
-  vscode.SymbolKind.Enum,
-  vscode.SymbolKind.EnumMember,
-  vscode.SymbolKind.Object,
-  vscode.SymbolKind.Namespace,
-  vscode.SymbolKind.Module,
-]);
+export function withoutDeadLegend(text: string): string {
+  return /^\*/m.test(text) ? text : text.replace(LEGEND, '');
+}
 
 /**
  * Names the rule calls visible, in the order they appear. Visibility is
@@ -120,24 +114,43 @@ function visibleNames(
   const rule = visibilityRule(source.path);
   const visible = new Set<string>();
   if (rule === undefined) return visible;
-  const walk = (nodes: readonly CodeSymbol[], parent: string, containerStart: number): void => {
+  // A grouping names what it groups — `impl Foo` — and reaches exactly as far
+  // as that symbol does, so a file-scope name the rule already rejected closes
+  // the group with it.
+  const rejected = new Set<string>();
+  const walk = (
+    nodes: readonly CodeSymbol[], parent: string, containerStart: number, inherited = false,
+  ): void => {
     for (const symbol of nodes) {
       const name = parent ? `${parent}.${symbol.name}` : symbol.name;
       const line = source.lines[symbol.declLine - 1];
-      const ok = line !== undefined && rule({
+      if (line === undefined) continue;
+      // The whole line: a keyword like `export` or `static` sits to the left of
+      // the name, so slicing at the name's column would discard it.
+      const decl = line.trim();
+      const scope = rule.scope({ kind: symbol.kind, decl });
+      if (scope === 'group') {
+        const words = new Set(decl.split(/\W+/));
+        if (![...rejected].some((hidden) => words.has(hidden))) walk(symbol.children, name, 0);
+        continue;
+      }
+      const ok = inherited || rule.visible({
         name: symbol.name,
-        // The whole line: a keyword like `export` or `static` sits to the left
-        // of the name, so slicing at the name's column would discard it.
-        decl: line.trim(),
+        decl,
         start: symbol.declLine,
         containerStart,
         column: symbol.column,
         lines: source.lines,
       });
-      if (!ok) continue; // an invisible container hides everything under it
+      if (!ok) {
+        // an invisible container hides everything under it
+        if (containerStart === 0) rejected.add(symbol.name);
+        continue;
+      }
       visible.add(name);
-      // Descending past anything but a member container reaches only locals.
-      if (MEMBER_CONTAINERS.has(symbol.kind)) walk(symbol.children, name, symbol.declLine);
+      if (scope !== undefined) {
+        walk(symbol.children, name, scope === 'file' ? 0 : symbol.declLine, scope === 'implicit');
+      }
     }
   };
   walk(symbols, '', 0);

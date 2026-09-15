@@ -1,7 +1,7 @@
 process.env.COMPRESSOR_NO_LEDGER = '1'; // never touch the real ledger from tests
 
 import { describe, expect, it } from 'vitest';
-import { OMISSION_MARKER } from '@astudioplus/compressor';
+import { OMISSION_MARKER, cheapEstimator } from '@astudioplus/compressor';
 import { SymbolKind } from 'vscode';
 import { retargetMarkers, runOutlineTool } from '../src/tools/outline';
 import type { ReadToolDeps } from '../src/tools/read';
@@ -142,6 +142,50 @@ describe('outline honesty', () => {
     expect(outcome.text).toContain('Thing.run_0');
     expect(outcome.text).not.toContain('visible outside this file');
     expect(outcome.text).not.toMatch(/^\*/m);
+  });
+
+  // The legend is spliced into the preamble before the cap runs. A file whose
+  // exports all sit below the cut shipped "unmarked names are internal to it"
+  // above a listing with no marks at all, which reads as "this file exports
+  // nothing" — the inverse of the preamble contract.
+  it('drops the legend when the budget cut away every mark it explains', async () => {
+    const COUNT = 120;
+    const internals = Array.from({ length: COUNT }, (_, i) => `function internalHelperNumber${i}() {}`);
+    const source = [...internals, 'export function shownAtTheEnd() {}'].join('\n');
+    const outcome = await runOutlineTool({ path: 'src/late.ts' }, deps(source, {
+      symbols: async () => [
+        ...internals.map((_, i) => ({
+          name: `internalHelperNumber${i}`, detail: '(): void', kind: SymbolKind.Function,
+          column: 9, declLine: i + 1, start: i + 1, end: i + 1, children: [],
+        })),
+        {
+          name: 'shownAtTheEnd', detail: '(): void', kind: SymbolKind.Function,
+          column: 16, declLine: COUNT + 1, start: COUNT + 1, end: COUNT + 1, children: [],
+        },
+      ],
+      tokenBudget: 200,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).not.toMatch(/^\*/m);
+    expect(outcome.text).not.toContain('visible outside this file');
+    // the caller still has to be told the listing is partial
+    expect(outcome.text).toContain('[compressor:');
+  });
+
+  // The backstop belongs to the tool, not to one of its paths: a file with no
+  // symbol provider takes the skeleton fallback, and an uncapped skeleton is
+  // what the host spills to a chat-session resource the model then re-reads.
+  it('caps the no-provider skeleton path when the host supplies no budget', async () => {
+    const source = Array.from({ length: 800 }, (_, i) => [
+      `def function_number_${i}(argument_one, argument_two):`,
+      '    value = argument_one + argument_two',
+      '    other = value * 2',
+      '    return other',
+    ].join('\n')).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/big.py' }, deps(source));
+    expect(outcome.isError).toBe(false);
+    expect(cheapEstimator(outcome.text)).toBeLessThanOrEqual(5_000);
+    expect(outcome.text.length).toBeLessThan(source.length);
   });
 
   it('never points the model at the built-in read, which the agent cannot use', () => {

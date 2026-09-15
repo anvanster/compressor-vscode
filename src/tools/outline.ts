@@ -9,7 +9,7 @@ import type { CompressMeta } from '@astudioplus/compressor';
 import { normalizeMode, numberLines, readFailure, resolveWorkspacePath } from './read';
 import type { ReadToolDeps } from './read';
 import { recordEvent } from '../ledger';
-import { documentSymbols, exportLegend, formatSymbols } from './symbols';
+import { documentSymbols, exportLegend, formatSymbols, withoutDeadLegend } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { effectiveBudget, selectOutput, fitOutput } from './output-policy';
 import { measureOperation } from '../operation-metrics';
@@ -99,10 +99,10 @@ export async function runOutlineTool(
       // capping second matters when the outline loses: a JSON provider reports
       // a symbol per key, so the outline of a package.json is larger than the
       // file, and the source it falls back to is a whole file.
-      const content = await fitOutput(
+      const content = withoutDeadLegend(await fitOutput(
         await selectOutput(numbered, candidate, budgeted), budgeted,
         `read a range with compressor_read ${input.path} offset=N limit=M`,
-      ) || candidate;
+      ) || candidate);
       if (content !== numbered) {
         void recordEvent({
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
@@ -127,32 +127,39 @@ export async function runOutlineTool(
     // so the instruction is unfollowable there; point at this tool instead, and
     // keep the workspace-relative path the model already used.
     result.content = retargetMarkers(result.content, resolved.absPath, input.path);
-    if (result.content !== numbered && await selectOutput(numbered, result.content, deps) === numbered) {
-      return { text: numbered, isError: false, outlined: false };
+    // The budget is a cap on this tool, not on one of its paths. A host that
+    // sends no tokenizationOptions still gets the backstop, and a file with no
+    // provider still gets it, or the host spills the whole file and the model
+    // re-reads the spill.
+    const cap = async (text: string): Promise<string> =>
+      await fitOutput(text, budgeted, `read a range with compressor_read ${input.path} offset=N limit=M`) || text;
+    if (result.content !== numbered && await selectOutput(numbered, result.content, budgeted) === numbered) {
+      const text = await cap(numbered);
+      return { text, isError: false, outlined: text !== numbered };
     }
     if (result.content === numbered || result.transform === undefined) {
       // signature model exists but produced no collapse (tiny file, or all
       // top-level declarations) — the full numbered file IS the outline
-      return {
-        text: `compressor_outline: ${input.path} is already all signatures — full file below\n${numbered}`,
-        isError: false,
-        outlined: false,
-      };
+      const text = await cap(
+        `compressor_outline: ${input.path} is already all signatures — full file below\n${numbered}`,
+      );
+      return { text, isError: false, outlined: false };
     }
 
+    const text = await cap(result.content);
     void recordEvent({
       ts: new Date().toISOString(),
       agent: 'vscode',
       tool: 'read',
       mode: deps.mode,
       charsIn: numbered.length,
-      charsOut: result.content.length,
+      charsOut: text.length,
       estTokensIn: cheapEstimator(numbered),
-      estTokensOut: cheapEstimator(result.content),
+      estTokensOut: cheapEstimator(text),
       transforms: [result.transform.id],
     }).catch(() => {});
 
-    return { text: result.content, isError: false, outlined: true };
+    return { text, isError: false, outlined: true };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { text: `compressor_outline failed: ${reason}`, isError: true, outlined: false };
