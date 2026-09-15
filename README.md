@@ -1,9 +1,8 @@
 # Compressor — AI Token Savings (VS Code)
 
-> Development build: five tools now include confirmed command execution and
-> retained-log retrieval. Source reads preserve comments; outlines use language
-> providers when available. This README and [usage guide](docs/USAGE.md)
-> describe version 0.5.0; the Marketplace release may not yet include it.
+> This README and the [usage guide](docs/USAGE.md) describe version 0.5.0. The
+> badge below shows the version currently published; if it is ahead of 0.5.0,
+> these documents describe an older release.
 
 [![VS Marketplace](https://vsmarketplacebadges.dev/version-short/aStudioPlus.compressor-vscode.svg)](https://marketplace.visualstudio.com/items?itemName=aStudioPlus.compressor-vscode)
 
@@ -35,10 +34,11 @@ the network.
     matches. Counts and continuation exclude context lines.
   - **`#compressorOutline`** — provider-backed symbols, nested methods and exact
     ranges, with a basic TS/JS, Python, Rust or Go fallback. A leading `*` marks
-    a declaration found to be visible outside its file, explained in the
-    listing's own preamble; the [usage guide](docs/USAGE.md) states what the mark
-    does and does not promise. Read implementation with `#compressorRead` using a
-    qualified symbol or line range.
+    a declaration found to be visible outside its file, or outside its class for
+    a member, explained in the listing's own preamble; the
+    [usage guide](docs/USAGE.md) states what the mark does and does not promise.
+    Read implementation with `#compressorRead` using a qualified symbol or line
+    range.
   - **`#compressorExecute`** — confirmed noninteractive commands with exit status,
     time/output limits, summaries and a retained log ID. The **Compressor Commands**
     Output channel shows captured output. Commands are not sandboxed. A command
@@ -163,8 +163,10 @@ workspace root. Check the exit status and retrieve omitted diagnostics with
 
 Adapt these repository-specific paths to your workspace. Search context is off
 by default; `→` marks selected matches and `|` marks context. Host budgets are
-optional hints, not user tool inputs. Exact reads and full-mode search are not
-budget-trimmed; explicit outline and command-summary tools still summarize.
+optional hints, not user tool inputs. Only `full` mode is exempt from bounding:
+every other read is capped, an exact range included, which comes back verbatim
+as far as it fits and then names the offset to resume from. Explicit outline and
+command-summary tools still summarize.
 
 In the *default* agent the model only *tends* to pick `compressor_read` on its
 own (no API forces it); the compressor agent and `/compressor` make it

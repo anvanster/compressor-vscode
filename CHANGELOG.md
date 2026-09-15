@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0 — 2026-09-11
+## 0.5.0 — 2026-09-15
 
 - **Fixed: oversized search results could attribute a match to the wrong file.**
   Trimming ran through the generic compression pipeline, whose head-and-tail

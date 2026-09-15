@@ -1,12 +1,14 @@
 # Using Compressor in VS Code
 
-A practical guide for the current development build. Compressor can reduce
-tool-output traffic before it reaches the model. Source reads preserve comments;
-search and command summaries can omit content with recovery guidance. Output
-reduction is not a measurement of net chat or billed-token savings.
+A practical guide for version 0.5.0. Compressor can reduce tool-output traffic
+before it reaches the model. Source reads preserve comments; search and command
+summaries can omit content with recovery guidance. Output reduction is not a
+measurement of net chat or billed-token savings.
 
 The tools do not upload workspace content themselves. Commands you approve can
-modify files and access the network. Marketplace releases may lag this guide.
+modify files and access the network. This guide tracks the repository, which can
+run ahead of the published extension; check the version in the Extensions view
+if something here does not match what you see.
 
 New here? Run **Welcome: Open Walkthrough** → **Get started with Compressor**
 for an in-editor tour of the steps below.
@@ -366,3 +368,8 @@ does not simulate the model host's token budget or tokenizer.
   `full` disables automatic bounding.
 - `compressor.savingsWindow` — `7d` | `30d` | `all` (default `30d`): lookback for
   the ticker and report.
+- `compressor.showActualUsage` — `true` | `false` (default `false`): append the
+  actual-usage section described in section 4 to the report.
+  It reports authoritative token counts read from this project's local Claude
+  Code session transcripts, which are real usage rather than savings, and it
+  covers Claude Code only.
