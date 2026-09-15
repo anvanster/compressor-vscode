@@ -176,10 +176,14 @@ file never exports is not marked.
 Only a type-like symbol's members are considered; what a function declares
 inside itself is a local, and no local is ever marked.
 What a container does to the names inside it depends on the container: an
-interface method or an enum constant has no keyword to carry, so it is marked
-with its container; a namespace member is judged as if it stood at file scope;
-and a Rust `impl` block is a grouping rather than a scope, so it is never
-marked itself and its methods are judged against the type it names.
+interface method or an enum constant carries no keyword of its own, so it is
+marked with its container unless it writes `private` or `protected`; a
+namespace member is judged as if it stood at file scope; and a Rust `impl`
+block is a grouping rather than a scope, so it is never marked itself and its
+items are judged by the file-scope `pub` rule.
+That last one has a known cost: a `pub` item in an `impl` on a file-private
+type is marked even though nothing outside the file can reach it, because one
+declaration line cannot say which type an `impl` is for.
 Languages without a rule are left unmarked entirely, and no preamble claims
 otherwise.
 

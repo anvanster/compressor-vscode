@@ -9,7 +9,7 @@ import type { CompressMeta } from '@astudioplus/compressor';
 import { normalizeMode, numberLines, readFailure, resolveWorkspacePath } from './read';
 import type { ReadToolDeps } from './read';
 import { recordEvent } from '../ledger';
-import { documentSymbols, exportLegend, formatSymbols, withoutDeadLegend } from './symbols';
+import { documentSymbols, exportLegend, formatSymbols } from './symbols';
 import type { CodeSymbol } from './symbols';
 import { effectiveBudget, selectOutput, fitOutput } from './output-policy';
 import { measureOperation } from '../operation-metrics';
@@ -90,19 +90,28 @@ export async function runOutlineTool(
       // questions about behaviour from names alone rather than reading the
       // ranges it was just handed.
       const body = formatSymbols(symbols, { path: resolved.absPath, lines: allLines });
-      const formatted = `${input.path}: signatures only, bodies omitted. ` +
-        exportLegend(body) +
-        'Read a range with compressor_read before describing what any of it does.\n' +
-        body;
-      const candidate = await fitOutput(formatted, budgeted, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
+      const preamble = (legend: string): string =>
+        `${input.path}: signatures only, bodies omitted. ${legend}` +
+        'Read a range with compressor_read before describing what any of it does.\n';
+      const head = preamble(exportLegend(body));
+      const formatted = head + body;
+      const capped = await fitOutput(formatted, budgeted, 'use compressor_read with offset/limit to inspect the remaining source') || formatted;
+      // The legend is settled a second time against the listing that survived
+      // the cap, by rebuilding the preamble this code composed. A file whose
+      // marks all sit below the cut would otherwise ship "unmarked names are
+      // internal" over a listing with no marks left to exempt.
+      const listed = capped.startsWith(head) ? capped.slice(head.length) : undefined;
+      const candidate = listed !== undefined && exportLegend(listed) === ''
+        ? preamble('') + listed
+        : capped;
       // The cap applies to whichever of the two is chosen. Selecting first and
       // capping second matters when the outline loses: a JSON provider reports
       // a symbol per key, so the outline of a package.json is larger than the
       // file, and the source it falls back to is a whole file.
-      const content = withoutDeadLegend(await fitOutput(
+      const content = await fitOutput(
         await selectOutput(numbered, candidate, budgeted), budgeted,
         `read a range with compressor_read ${input.path} offset=N limit=M`,
-      ) || candidate);
+      ) || candidate;
       if (content !== numbered) {
         void recordEvent({
           ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
@@ -140,10 +149,20 @@ export async function runOutlineTool(
     if (result.content === numbered || result.transform === undefined) {
       // signature model exists but produced no collapse (tiny file, or all
       // top-level declarations) — the full numbered file IS the outline
-      const text = await cap(
-        `compressor_outline: ${input.path} is already all signatures — full file below\n${numbered}`,
-      );
-      return { text, isError: false, outlined: false };
+      const head = `compressor_outline: ${input.path} is already all signatures — full file below\n`;
+      const whole = head + numbered;
+      const capped = await cap(whole);
+      if (capped === whole) return { text: whole, isError: false, outlined: false };
+      // The budget cut the listing, so "full file below" is no longer true.
+      // The recovery marker the cap appended says what was returned instead.
+      const text = capped.startsWith(head) ? capped.slice(head.length) : capped;
+      void recordEvent({
+        ts: new Date().toISOString(), agent: 'vscode', tool: 'read', mode: deps.mode,
+        charsIn: numbered.length, charsOut: text.length,
+        estTokensIn: cheapEstimator(numbered), estTokensOut: cheapEstimator(text),
+        transforms: ['host-budget'],
+      }).catch(() => {});
+      return { text, isError: false, outlined: true };
     }
 
     const text = await cap(result.content);

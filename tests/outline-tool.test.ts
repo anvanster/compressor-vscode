@@ -172,6 +172,46 @@ describe('outline honesty', () => {
     expect(outcome.text).toContain('[compressor:');
   });
 
+  // The source fallback is the file's own bytes, and a model copying an
+  // `old_string` out of it has to match what is on disk. Rewriting the
+  // returned text to drop a legend sentence edited the file's content when the
+  // file happened to quote that sentence.
+  it('returns the source fallback byte for byte, legend sentence and all', async () => {
+    const legend =
+      '* = visible outside this file or its class; unmarked names are internal to it, so do not list them as its API. ';
+    const source = [
+      'const LEGEND =',
+      `  '${legend}';`,
+      'export function explain(): string { return LEGEND; }',
+    ].join('\n');
+    const outcome = await runOutlineTool({ path: 'src/legend.ts' }, deps(source, {
+      // a listing larger than the file, so selectOutput returns the source
+      symbols: async () => Array.from({ length: 60 }, (_, i) => ({
+        name: `symbolNumber${i}`, detail: `(argument: SomeFairlyLongTypeName${i}) => void`,
+        kind: SymbolKind.Function, column: 0, declLine: 1, start: 1, end: 1, children: [],
+      })),
+    }));
+    const returned = outcome.text.split('\n').map((line) => line.replace(/^\s*\d+→/, '')).join('\n');
+    expect(returned).toBe(source);
+  });
+
+  // "full file below" is a coverage claim. The cap that shortens the listing
+  // makes it false, and it sat at the head of the string the cap truncated.
+  it('drops the full-file claim when the budget cut the listing short', async () => {
+    const source = Array.from(
+      { length: 400 },
+      (_, i) => `export type AliasNumber${i} = SomeFairlyLongTypeName${i};`,
+    ).join('\n');
+    const outcome = await runOutlineTool({ path: 'src/types.ts' }, deps(source, {
+      tokenBudget: 200,
+      countTokens: async (text: string) => Math.ceil(text.length / 4),
+    }));
+    expect(outcome.text).not.toContain('full file below');
+    expect(outcome.text).toContain('[compressor:');
+    expect(Math.ceil(outcome.text.length / 4)).toBeLessThanOrEqual(200);
+    expect(outcome.outlined).toBe(true);
+  });
+
   // The backstop belongs to the tool, not to one of its paths: a file with no
   // symbol provider takes the skeleton fallback, and an uncapped skeleton is
   // what the host spills to a chat-session resource the model then re-reads.

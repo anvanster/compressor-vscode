@@ -12,9 +12,12 @@ import * as vscode from 'vscode';
  * A hint is all this is. Each rule reads one line, so it can under-mark (a
  * TypeScript `export { a, b }` list re-exports names whose own declaration
  * lines say nothing) and, in C/C++, over-mark (a non-`static` definition in a
- * .c file is externally linkable even when no header declares it). Unknown
- * extensions mark nothing at all. Under-marking is the safe direction: the
- * caller reads unmarked code rather than trusting a wrong summary.
+ * .c file is externally linkable even when no header declares it). A `pub` item
+ * in a Rust `impl` on a file-private type is marked as well, though nothing
+ * outside the file can reach it: the impl line does not say which type it is
+ * for in a form one line can resolve. Unknown extensions mark nothing at all.
+ * Under-marking is the safe direction: the caller reads unmarked code rather
+ * than trusting a wrong summary.
  */
 
 /** One symbol, with the context its visibility rule needs. */
@@ -65,8 +68,7 @@ export type MemberScope =
   | 'implicit'
   /**
    * A grouping rather than a scope: the container is not itself a symbol and is
-   * never marked, its children are judged at file scope, and it is reachable
-   * only as far as the symbol it names is.
+   * never marked, and its children are judged at file scope.
    */
   | 'group';
 
@@ -74,12 +76,6 @@ export interface LanguageRule {
   visible: (context: VisibilityContext) => boolean;
   /** undefined for a kind that declares nothing: its children are locals. */
   scope: (container: ContainerContext) => MemberScope | undefined;
-  /**
-   * The declaration a `group` container borrows its reach from, when it names
-   * one. A Rust `impl` is reachable exactly as far as its self type is; a
-   * namespace names nothing and is closed by nothing.
-   */
-  subject?: (container: ContainerContext) => string | undefined;
 }
 
 type Rule = LanguageRule['visible'];
@@ -119,35 +115,24 @@ const withNamespaces = (namespaces: MemberScope) =>
   };
 
 /**
- * The untrimmed declaration line up to the name's column: every modifier sits
- * to the left of the name it qualifies, and everything to the right belongs to
- * the signature. `class Box(private val item: T)` declares a public `Box`, and
- * scanning the whole line for `private` would call it hidden.
+ * The modifiers that qualify this name and no other: the declaration line from
+ * the nearest `(` or `,` before the name up to the name itself. A keyword to
+ * the right belongs to a later declaration, and one to the left of an earlier
+ * parameter belongs to that parameter — `class Foo(private val a: A, val b: B)`
+ * declares a public `b`. With no delimiter the whole prefix qualifies the name,
+ * so `class Box(...)` still reads its own `class `.
  */
-const beforeName = (context: VisibilityContext): string =>
-  (context.lines[context.start - 1] ?? '').slice(0, context.column);
+const beforeName = (context: VisibilityContext): string => {
+  const prefix = (context.lines[context.start - 1] ?? '').slice(0, context.column);
+  return prefix.slice(Math.max(prefix.lastIndexOf('('), prefix.lastIndexOf(',')) + 1);
+};
 
 /**
- * Public unless the declaration hides it. Reading only the text left of the
- * name is what makes this narrow enough to trust: a keyword there qualifies
- * this declaration and nothing else, so `constructor(public a: A, private b: B)`
- * resolves both parameter properties, and a `Private` in a return type or an
- * argument name to the right of the name cannot veto anything.
+ * Public unless the declaration hides it, judged from the modifiers that
+ * qualify this name alone.
  */
 export const implicitlyVisible = (context: VisibilityContext): boolean =>
   !/\b(?:private|protected)\b/.test(beforeName(context)) && !context.name.startsWith('#');
-
-/**
- * The self type of a Rust `impl`, which is the only declaration its reach
- * depends on: the type after `for` when the block implements a trait, and the
- * type after `impl` otherwise, with generic arguments and lifetimes dropped.
- * `impl From<Buffer> for Writer` is reachable as far as `Writer` is, and a
- * private `Buffer` it merely converts from says nothing about that.
- */
-const rustSelfType = ({ decl }: ContainerContext): string | undefined => {
-  const path = /^impl\b(?:\s*<.*?>)?\s+(?:.*\s+for\s+)?([^\s{<]+)/.exec(decl)?.[1];
-  return path === undefined ? undefined : path.split('::').pop()!.replace(/^\W+/, '') || undefined;
-};
 
 /**
  * `public:` / `private:` / `protected:` and the `class` / `struct` / `union`
@@ -214,7 +199,6 @@ const RULES: Record<string, LanguageRule> = {
   rs: {
     visible: (context) => /^pub\b/.test(context.decl),
     scope: (container) => /^impl\b/.test(container.decl) ? 'group' : withNamespaces('file')(container),
-    subject: rustSelfType,
   },
   // Exported identifiers are capitalised, at every depth including fields. An
   // interface method follows the same rule, so nothing here is implicit.

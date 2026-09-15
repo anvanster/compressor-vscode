@@ -143,6 +143,24 @@ describe('other languages', () => {
       .toEqual(['Service', 'api', 'run']);
   });
 
+  // A keyword qualifies one parameter. Scanning the whole line to the left of
+  // the name let the first hidden parameter hide every public one after it,
+  // and the legend then called a real dependency internal.
+  it('judges each parameter property by its own keyword, whatever the order', () => {
+    const ts = [
+      'export class Service {',
+      '  constructor(private dep: Dep, public readonly api: Api) {}',
+      '}',
+    ].join('\n');
+    expect(exported('a.ts', ts, [['Service', ['dep', 'api'], SymbolKind.Class]]))
+      .toEqual(['Service', 'api']);
+  });
+
+  it('judges each Kotlin constructor property by its own keyword', () => {
+    const kt = 'class Box(private val secret: S, val label: L)';
+    expect(exported('Box.kt', kt, [['Box', ['secret', 'label']]])).toEqual(['Box', 'label']);
+  });
+
   it('marks Rust pub and pub(crate) at any depth', () => {
     const rs = ['pub fn open() {}', 'fn shut() {}', 'pub struct S {', '    pub field: u8,', '    hidden: u8,', '}'].join('\n');
     expect(exported('a.rs', rs, [['open', []], ['shut', []], ['S', ['field', 'hidden']]]))
@@ -212,59 +230,26 @@ describe('what a container does to the symbols inside it', () => {
     ])).toEqual(['Foo', 'new']);
   });
 
-  it('does not mark the impl of a struct the file keeps to itself', () => {
+  // An impl block is judged by the file-scope `pub` rule and nothing else. The
+  // stated cost: a `pub` item in an impl on a file-private type is marked,
+  // though nothing outside the file can reach it. One line of source cannot
+  // say which type an impl is for without re-deriving the module's name
+  // resolution, and three rounds of trying produced a different wrong answer
+  // each time — a limitation that can be written down beats a heuristic.
+  it('marks a pub item in an impl even when its type stays in the file', () => {
     const rs = ['struct Hidden;', 'impl Hidden {', '    pub fn new() -> Self { Hidden }', '}'].join('\n');
     expect(exported('a.rs', rs, [
       ['Hidden', [], SymbolKind.Struct],
       ['impl Hidden', ['new'], SymbolKind.Object],
-    ])).toEqual([]);
+    ])).toEqual(['new']);
   });
 
-  // The self type is the only declaration an impl's reach depends on. Scanning
-  // every token on the line let a private type mentioned in a parameter
-  // position close a block that has nothing to do with it.
-  it('follows the self type of a trait impl, not the types it converts from', () => {
-    const rs = [
-      'struct Buffer;',
-      'pub struct Writer;',
-      'impl From<Buffer> for Writer {',
-      '    pub fn new() -> Self { Writer }',
-      '}',
-    ].join('\n');
+  it('leaves an impl item with no pub unmarked', () => {
+    const rs = ['pub struct Foo;', 'impl Foo {', '    fn helper(&self) {}', '}'].join('\n');
     expect(exported('a.rs', rs, [
-      ['Buffer', [], SymbolKind.Struct],
-      ['Writer', [], SymbolKind.Struct],
-      ['impl From<Buffer> for Writer', ['new'], SymbolKind.Object],
-    ])).toEqual(['Writer', 'new']);
-  });
-
-  it('strips generic arguments from the self type', () => {
-    const rs = ['struct Hidden;', 'impl<T> Hidden<T> {', '    pub fn new() {}', '}'].join('\n');
-    expect(exported('a.rs', rs, [
-      ['Hidden', [], SymbolKind.Struct],
-      ['impl<T> Hidden<T>', ['new'], SymbolKind.Object],
-    ])).toEqual([]);
-  });
-
-  // Only what the top-level frame rejects can close a group. A method name
-  // inside one impl is not a file-scope type and must not close the next.
-  it('does not let an unmarked method name close a later impl', () => {
-    const rs = [
-      'pub struct A;',
-      'impl Display for A {',
-      '    fn fmt(&self) {}',
-      '}',
-      'pub struct B;',
-      'impl fmt::Debug for B {',
-      '    pub fn go() {}',
-      '}',
-    ].join('\n');
-    expect(exported('a.rs', rs, [
-      ['A', [], SymbolKind.Struct],
-      ['impl Display for A', ['fmt'], SymbolKind.Object],
-      ['B', [], SymbolKind.Struct],
-      ['impl fmt::Debug for B', ['go'], SymbolKind.Object],
-    ])).toEqual(['A', 'B', 'go']);
+      ['Foo', [], SymbolKind.Struct],
+      ['impl Foo', ['helper'], SymbolKind.Object],
+    ])).toEqual(['Foo']);
   });
 
   it('marks a Rust trait method, which carries no pub of its own', () => {

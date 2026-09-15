@@ -92,17 +92,6 @@ export function exportLegend(formatted: string): string {
 }
 
 /**
- * The legend is spliced into a preamble before the budget cap runs, so a file
- * whose marked declarations all sit below the cut ships the sentence with
- * nothing for it to explain — and "unmarked names are internal" then reads as
- * "this file exports nothing". Drop it from whatever text is actually
- * returned, which only ever shortens it.
- */
-export function withoutDeadLegend(text: string): string {
-  return /^\*/m.test(text) ? text : text.replace(LEGEND, '');
-}
-
-/**
  * Names the rule calls visible, in the order they appear. Visibility is
  * inherited: a public method of a class the file never exports is no more
  * reachable from outside than the class is, so a symbol is listed only when
@@ -114,9 +103,6 @@ function visibleNames(
   const rule = visibilityRule(source.path);
   const visible = new Set<string>();
   if (rule === undefined) return visible;
-  // A grouping borrows the reach of the type it names, so a file-scope type
-  // the rule already rejected closes the group with it.
-  const rejected = new Set<string>();
   const walk = (
     nodes: readonly CodeSymbol[], parent: string, containerStart: number,
     implicitFrom?: vscode.SymbolKind,
@@ -131,8 +117,7 @@ function visibleNames(
       const container = { kind: symbol.kind, decl };
       const scope = rule.scope(container);
       if (scope === 'group') {
-        const subject = rule.subject?.(container);
-        if (subject === undefined || !rejected.has(subject)) walk(symbol.children, name, 0);
+        walk(symbol.children, name, 0);
         continue;
       }
       const context = {
@@ -148,11 +133,7 @@ function visibleNames(
       const implicit = implicitFrom !== undefined
         && (implicitFrom !== vscode.SymbolKind.Enum || symbol.kind === vscode.SymbolKind.EnumMember);
       const ok = implicit ? implicitlyVisible(context) : rule.visible(context);
-      if (!ok) {
-        // an invisible container hides everything under it
-        if (parent === '' && scope !== undefined) rejected.add(symbol.name);
-        continue;
-      }
+      if (!ok) continue; // an invisible container hides everything under it
       visible.add(name);
       if (scope !== undefined) {
         walk(

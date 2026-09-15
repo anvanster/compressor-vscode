@@ -126,7 +126,7 @@ export async function completeStructure(
   absPath: string,
   requested: string,
   deps: ReadToolDeps,
-  lines: readonly string[] = [],
+  lines: readonly string[],
 ): Promise<string | undefined> {
   let symbols: CodeSymbol[];
   try {
