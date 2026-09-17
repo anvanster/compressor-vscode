@@ -2,7 +2,7 @@
     "name": "compressor-vscode",
     "displayName": "Compressor — AI Token Savings",
     "description": "Reduce tool-output traffic in Copilot with source-preserving reads, search, outlines, confirmed commands and retained logs. Includes output-reduction reports and steering.",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "publisher": "aStudioPlus",
     "icon": "assets/icon.png",
     "author": "Andrey Vasilevsky <anvanster@gmail.com>",
@@ -109,6 +109,16 @@
                     "default": "optimized",
                     "description": "Read/search policy: full disables automatic compression; optimized/slim preserve source code and comments, collapse repeated log lines and bound search results. Explicit outline and execution tools still summarize. An exact range is returned verbatim but stops at the token budget, and every result is bounded by one: the host's when it sends one, a built-in backstop when it does not. Figures measure gross output reduction, not session savings."
                 },
+                "compressor.pricingModel": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Model id used to price saved tokens in the savings report. Empty uses the default chat model named by your own Copilot model catalog, which is also where the rates come from — nothing is priced when that catalog is unavailable."
+                },
+                "compressor.showCopilotUsage": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Append an 'actual Copilot usage' section to the savings report with provider-reported request, model and token counts for this workspace, plus how much of the prompt compressor removed before sending. Requires 'github.copilot.chat.agentDebugLog.fileLogging.enabled' and a window reload; capture is not retroactive. Off by default because those debug logs contain your prompt and response text."
+                },
                 "compressor.showActualUsage": {
                     "type": "boolean",
                     "default": false,
@@ -116,7 +126,10 @@
                 },
                 "compressor.projectLabel": {
                     "type": "string",
-                    "enum": ["hashed", "name"],
+                    "enum": [
+                        "hashed",
+                        "name"
+                    ],
                     "enumDescriptions": [
                         "Machine-local keyed hash of the workspace path. The key never leaves this machine and is never written to the ledger, so a shared report cannot be reversed to project names.",
                         "The workspace folder name in clear text. Anyone you share the report or ledger with sees your project names."
@@ -136,11 +149,23 @@
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "command": { "type": "string", "minLength": 1 },
-                        "cwd": { "type": "string", "description": "Workspace directory; defaults to first root" },
-                        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 600 }
+                        "command": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Workspace directory; defaults to first root"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 600
+                        }
                     },
-                    "required": ["command"]
+                    "required": [
+                        "command"
+                    ]
                 }
             },
             {
@@ -152,12 +177,27 @@
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "id": { "type": "string" },
-                        "offset": { "type": "integer", "minimum": 1 },
-                        "limit": { "type": "integer", "minimum": 1, "maximum": 500 },
-                        "characterOffset": { "type": "integer", "minimum": 0, "description": "Continue an oversized selected range at this character offset" }
+                        "id": {
+                            "type": "string"
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500
+                        },
+                        "characterOffset": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Continue an oversized selected range at this character offset"
+                        }
                     },
-                    "required": ["id"]
+                    "required": [
+                        "id"
+                    ]
                 }
             },
             {
@@ -224,8 +264,18 @@
                             "maximum": 1000,
                             "description": "maximum number of matches to return"
                         },
-                        "root": { "type": "string", "description": "Open workspace folder name or absolute path" },
-                        "output": { "type": "string", "enum": ["content", "files", "count"] },
+                        "root": {
+                            "type": "string",
+                            "description": "Open workspace folder name or absolute path"
+                        },
+                        "output": {
+                            "type": "string",
+                            "enum": [
+                                "content",
+                                "files",
+                                "count"
+                            ]
+                        },
                         "contextLines": {
                             "type": "integer",
                             "minimum": 0,
@@ -339,7 +389,7 @@
         "package": "vsce package --no-dependencies"
     },
     "dependencies": {
-        "@astudioplus/compressor": "^0.5.2"
+        "@astudioplus/compressor": "^0.6.0"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

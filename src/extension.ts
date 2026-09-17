@@ -45,7 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // cannot drift: one key (~/.compressor/project-salt), one algorithm. The key
   // is never written to the ledger, so a shared report cannot be tested against
   // candidate project names.
-  setProjectResolver(createProjectResolver({
+  const resolveProjectLabel = createProjectResolver({
     salt: ensureProjectSalt,
     disabled: ledgerDisabled,
     folder: () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
@@ -53,7 +53,8 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.workspace.getConfiguration('compressor').get('projectLabel'),
     ),
     label: projectLabel,
-  }));
+  });
+  setProjectResolver(resolveProjectLabel);
 
   // Steering that this build would rewrite is surfaced passively: a warning on
   // the ticker, a banner in the report, and a line in "Compressor: Status".
@@ -78,7 +79,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const source = createLedgerSource();
   const ticker = new SavingsTicker(source, async () => (await staleScopes()).length > 0);
   const mode = new ModeStatusItem();
-  const panel = new SavingsPanel(source, steeringNotice);
+  const panel = new SavingsPanel(source, steeringNotice, context.storageUri?.fsPath, resolveProjectLabel);
   const channel = vscode.window.createOutputChannel('Compressor');
 
   context.subscriptions.push(

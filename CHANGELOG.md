@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.6.0 — 2026-09-17
+
+- **Added: the savings report shows what compression is worth, in money.**
+  Saved tokens are priced from your own Copilot model catalog — the `models.json`
+  VS Code writes beside its debug logs — so the rates are your account's real
+  ones rather than a maintained price list that goes stale. No catalog means no
+  money figures, never a guess. Only the Copilot surfaces are priced: Claude Code
+  and OpenCode savings appear as a named, unvalued remainder instead of being
+  converted at a rate that does not apply to them.
+  New setting `compressor.pricingModel` overrides the model used; empty uses the
+  default chat model the catalog itself names.
+- **Added: actual Copilot usage, beside the estimated savings.** With
+  `compressor.showCopilotUsage` enabled, the report reads this workspace's chat
+  debug logs and shows provider-reported requests, models, prompt and output
+  tokens, cache-read share and billed AI Units — then states what fraction of the
+  prompt compressor removed before it was sent. Off by default, and gated on
+  `github.copilot.chat.agentDebugLog.fileLogging.enabled`, because those logs
+  contain your prompt and response text. Capture is not retroactive.
+  The reduction share is scoped to the current project, since the ledger is
+  machine-wide while the logs are per-workspace and comparing them unfiltered
+  would inflate the figure.
+  Resolving the log directory from the extension's own storage path means this
+  works unchanged over remote-SSH, where the logs live on the remote host.
+- **Changed: the savings report is a dashboard.** A row of headline numbers and
+  a card grid replace the flat list of charts — a column chart over time, donuts
+  for composition, bars for the rest. The webview still runs with scripts
+  disabled: every chart is static SVG with no JavaScript and no network requests.
+- Empty states are diagnostic rather than generic: the report distinguishes
+  "debug logging is off", "logging works but nothing has been recorded yet" and
+  "the log schema moved and compressor needs an update", naming the attributes it
+  actually found in the last case.
+
 ## 0.5.0 — 2026-09-15
 
 - **Fixed: oversized search results could attribute a match to the wrong file.**
